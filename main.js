@@ -92,7 +92,7 @@ function cmpVersion(a, b) {
 
 function checkUpdate(manual) {
   const req = net.request('https://api.github.com/repos/' + REPO + '/releases/latest');
-  req.setHeader('User-Agent', 'WhiteboardPen');
+  req.setHeader('User-Agent', 'PiPen');
   req.setHeader('Accept', 'application/vnd.github+json');
   req.on('response', (res) => {
     let body = '';

@@ -1,6 +1,8 @@
-# Whiteboard Pen (Windows 판서 오버레이)
+# Pi Pen (Windows 판서 오버레이)
 
 전자칠판/OPS 윈도우용 투명 오버레이 판서 앱. 실행하면 바로 화면 위에 필기.
+
+제작: [pi-dimension.com](https://pi-dimension.com)
 
 ## 실행
 
@@ -14,11 +16,11 @@ npm start
 npm run dist
 ```
 
-- `WhiteboardPen-Setup-*.exe` — **설치형(NSIS, 권장)**. 설치 경로 선택 가능, 사용자 계정 단위라 관리자 권한 불필요,
+- `PiPen-Setup-*.exe` — **설치형(NSIS, 권장)**. 설치 경로 선택 가능, 사용자 계정 단위라 관리자 권한 불필요,
   바탕화면·시작메뉴 바로가기 생성. 실행이 가장 빠름 (약 0.6초)
-- `WhiteboardPen-*-win-x64.zip` — **무설치(권장)**. 압축을 푼 폴더에서 `WhiteboardPen.exe` 실행.
+- `PiPen-*-win-x64.zip` — **무설치(권장)**. 압축을 푼 폴더에서 `PiPen.exe` 실행.
   USB에 넣어 쓰기 좋고 실행 속도는 설치형과 동일
-- `WhiteboardPen-Portable-*.exe` — 단일 실행 파일. 편하지만 **실행할 때마다 임시 폴더에 앱 전체를 풀기 때문에
+- `PiPen-Portable-*.exe` — 단일 실행 파일. 편하지만 **실행할 때마다 임시 폴더에 앱 전체를 풀기 때문에
   매번 5~6초** 걸립니다. 자주 켠다면 위의 zip 또는 설치형을 쓰세요
 
 ### 실행 속도 측정값 (창이 뜨기까지)

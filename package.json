@@ -1,7 +1,7 @@
 {
-  "name": "whiteboard-pen",
+  "name": "pi-pen",
   "version": "1.0.5",
-  "description": "Windows floating annotation (pen) overlay for electronic whiteboards",
+  "description": "Pi Pen — 전자칠판/OPS 윈도우용 투명 오버레이 판서 앱",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -16,8 +16,8 @@
     "electron-builder": "^25.1.8"
   },
   "build": {
-    "appId": "com.songdo.whiteboardpen",
-    "productName": "WhiteboardPen",
+    "appId": "com.pidimension.pipen",
+    "productName": "PiPen",
     "files": [
       "main.js",
       "preload.js",
@@ -57,15 +57,15 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "판서 (WhiteboardPen)",
-      "artifactName": "WhiteboardPen-Setup-${version}.exe",
+      "shortcutName": "Pi Pen (판서)",
+      "artifactName": "PiPen-Setup-${version}.exe",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "installerHeaderIcon": "build/icon.ico"
     },
     "portable": {
-      "artifactName": "WhiteboardPen-Portable-${version}.exe",
-      "unpackDirName": "WhiteboardPen"
+      "artifactName": "PiPen-Portable-${version}.exe",
+      "unpackDirName": "PiPen"
     },
     "publish": [
       {

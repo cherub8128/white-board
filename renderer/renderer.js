@@ -1,5 +1,5 @@
 /* ============================================================
- *  Whiteboard Pen - renderer
+ *  Pi Pen - renderer
  *  - 멀티 포인터(펜 2개 동시 필기) 지원
  *  - 팜(넓은 접촉) 자동 지우개
  *  - 지우개: 획 / 영역 / 전체
@@ -776,7 +776,7 @@ function showInfo() {
     '<div class="row"><span>제작</span><a data-url="' + appInfo.homepage + '" href="#">pi-dimension.com</a></div>' +
     '<div class="row"><span>릴리즈</span><a data-url="' + appInfo.releases + '" href="#">github.com/cherub8128/white-board</a></div>' +
     '<div class="row"><span>라이선스</span><b>MIT</b></div>';
-  openModal('판서 (WhiteboardPen)', body, [
+  openModal('Pi Pen', body, [
     { label: '업데이트 확인', onclick: () => { toast('업데이트를 확인하는 중...'); window.overlay.checkUpdate(); } },
     { label: '닫기', primary: true }
   ]);
