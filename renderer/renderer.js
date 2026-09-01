@@ -48,18 +48,29 @@ let redoStack = [];
 let strokeSeq = 0;
 const active = new Map();  // pointerId -> stroke state
 
-/* ---------------- 캔버스 ---------------- */
+/* ---------------- 캔버스 ----------------
+ * 확정된 획은 오프스크린 레이어(base)에 한 번만 그리고,
+ * 화면은 매 프레임 base + 진행 중인 획으로 합성한다.
+ * 형광펜처럼 반투명한 획을 세그먼트마다 겹쳐 그리면 이음새가 진하게 찍히기 때문에,
+ * 획 하나는 항상 path 하나로 한 번에 그린다. */
+const base = document.createElement('canvas');
+const bctx = base.getContext('2d');
+
 let dpr = 1;
 function resizeCanvas() {
   dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.round(window.innerWidth * dpr);
-  canvas.height = Math.round(window.innerHeight * dpr);
+  for (const cv of [canvas, base]) {
+    cv.width = Math.round(window.innerWidth * dpr);
+    cv.height = Math.round(window.innerHeight * dpr);
+  }
   canvas.style.width = window.innerWidth + 'px';
   canvas.style.height = window.innerHeight + 'px';
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  redrawAll();
+  for (const c of [ctx, bctx]) {
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.lineCap = 'round';
+    c.lineJoin = 'round';
+  }
+  rebuildBase();
 }
 window.addEventListener('resize', () => {
   resizeCanvas();
@@ -71,50 +82,81 @@ function widthAt(st, p) {
   return st.size;
 }
 
-/* 중점 보간(quadratic)으로 매끄럽게 + 세그먼트별 두께 */
-function drawStroke(st, upto) {
+/* 획 하나를 그린다.
+ * 펜: 필압에 따라 세그먼트마다 두께가 달라지므로 세그먼트 단위로 (알파 1 이라 겹쳐도 티가 안 남)
+ * 형광펜·지우개: 두께가 일정하므로 path 하나로 한 번에 (반투명 겹침 방지) */
+function renderStroke(c, st, fromIndex) {
   const pts = st.pts;
-  const n = (upto === undefined ? pts.length : upto);
-  if (n === 0) return;
+  if (pts.length === 0) return;
 
-  ctx.save();
-  ctx.globalCompositeOperation = st.comp;
-  ctx.globalAlpha = st.alpha;
-  ctx.strokeStyle = st.color;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
+  c.save();
+  c.globalCompositeOperation = st.comp;
+  c.globalAlpha = st.alpha;
+  c.strokeStyle = st.color;
+  c.lineCap = 'round';
+  c.lineJoin = 'round';
 
-  if (n === 1) {
-    ctx.beginPath();
-    ctx.fillStyle = st.color;
-    ctx.arc(pts[0].x, pts[0].y, widthAt(st, pts[0]) / 2, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+  if (pts.length === 1) {
+    c.beginPath();
+    c.fillStyle = st.color;
+    c.arc(pts[0].x, pts[0].y, widthAt(st, pts[0]) / 2, 0, Math.PI * 2);
+    c.fill();
+    c.restore();
     return;
   }
 
-  const start = (upto === undefined) ? 1 : n - 1;
-  for (let i = Math.max(1, start); i < n; i++) {
-    const a = pts[i - 1], b = pts[i];
-    const prev = pts[i - 2] || a;
-    const m0 = { x: (prev.x + a.x) / 2, y: (prev.y + a.y) / 2 };
-    const m1 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-    ctx.beginPath();
-    ctx.lineWidth = (widthAt(st, a) + widthAt(st, b)) / 2;
-    ctx.moveTo(m0.x, m0.y);
-    ctx.quadraticCurveTo(a.x, a.y, m1.x, m1.y);
-    if (i === n - 1) ctx.lineTo(b.x, b.y);
-    ctx.stroke();
+  if (st.tool === 'pen') {
+    for (let i = Math.max(1, fromIndex || 1); i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i], prev = pts[i - 2] || a;
+      c.beginPath();
+      c.lineWidth = (widthAt(st, a) + widthAt(st, b)) / 2;
+      c.moveTo((prev.x + a.x) / 2, (prev.y + a.y) / 2);
+      c.quadraticCurveTo(a.x, a.y, (a.x + b.x) / 2, (a.y + b.y) / 2);
+      if (i === pts.length - 1) c.lineTo(b.x, b.y);
+      c.stroke();
+    }
+  } else {
+    c.lineWidth = st.size;
+    c.beginPath();
+    c.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length - 1; i++) {
+      c.quadraticCurveTo(pts[i].x, pts[i].y,
+        (pts[i].x + pts[i + 1].x) / 2, (pts[i].y + pts[i + 1].y) / 2);
+    }
+    c.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+    c.stroke();     // 획 전체를 한 번의 stroke 로 — 이음새 겹침 없음
   }
-  ctx.restore();
+  c.restore();
 }
 
-function redrawAll() {
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  for (const st of strokes) if (!st.gone) drawStroke(st);
-  for (const a of active.values()) if (a.stroke) drawStroke(a.stroke);
+function clearCanvas(c, cv) {
+  c.save();
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.clearRect(0, 0, cv.width, cv.height);
+  c.restore();
+}
+
+/* 확정된 획들을 오프스크린 레이어에 다시 그린다 (실행취소·지우기 후 호출) */
+function rebuildBase() {
+  clearCanvas(bctx, base);
+  for (const st of strokes) if (!st.gone) renderStroke(bctx, st);
+  requestPaint();
+}
+
+/* 화면 합성 — 프레임당 한 번만 */
+let paintQueued = false;
+function requestPaint() {
+  if (paintQueued) return;
+  paintQueued = true;
+  requestAnimationFrame(() => {
+    paintQueued = false;
+    clearCanvas(ctx, canvas);
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(base, 0, 0);
+    ctx.restore();
+    for (const a of active.values()) if (a.stroke) renderStroke(ctx, a.stroke);
+  });
 }
 
 /* ---------------- 입력 ---------------- */
@@ -171,7 +213,7 @@ canvas.addEventListener('pointerdown', (e) => {
   const stroke = makeStroke(kind, e);
   stroke.pts.push(pointOf(e));
   active.set(e.pointerId, { kind, stroke });
-  drawStroke(stroke);
+  requestPaint();
 }, { passive: false });
 
 canvas.addEventListener('pointermove', (e) => {
@@ -192,8 +234,8 @@ canvas.addEventListener('pointermove', (e) => {
     const last = st.pts[st.pts.length - 1];
     if (Math.hypot(p.x - last.x, p.y - last.y) < 0.7) continue;
     st.pts.push(p);
-    drawStroke(st, st.pts.length);
   }
+  requestPaint();
 }, { passive: false });
 
 function endPointer(e) {
@@ -210,7 +252,8 @@ function endPointer(e) {
   strokes.push(st);
   history.push({ kind: 'draw', id: st.id });
   redoStack = [];
-  redrawAll();
+  renderStroke(bctx, st);     // 확정된 획만 레이어에 추가 (전체 다시 그리지 않음)
+  requestPaint();
 }
 canvas.addEventListener('pointerup', endPointer);
 canvas.addEventListener('pointercancel', endPointer);
@@ -228,7 +271,7 @@ function eraseStrokeAt(p, removedOut) {
       hit = true;
     }
   }
-  if (hit) redrawAll();
+  if (hit) rebuildBase();
 }
 
 function hitStroke(st, p, tol) {
@@ -255,21 +298,21 @@ function undo() {
   if (!op) { toast('되돌릴 작업이 없습니다'); return; }
   if (op.kind === 'draw') { const s = findStroke(op.id); if (s) s.gone = true; }
   else { for (const id of op.ids) { const s = findStroke(id); if (s) s.gone = false; } }
-  redoStack.push(op); redrawAll();
+  redoStack.push(op); rebuildBase();
 }
 function redo() {
   const op = redoStack.pop();
   if (!op) { toast('다시 실행할 작업이 없습니다'); return; }
   if (op.kind === 'draw') { const s = findStroke(op.id); if (s) s.gone = false; }
   else { for (const id of op.ids) { const s = findStroke(id); if (s) s.gone = true; } }
-  history.push(op); redrawAll();
+  history.push(op); rebuildBase();
 }
 function clearAll() {
   const ids = strokes.filter(s => !s.gone).map(s => s.id);
   if (!ids.length) { toast('지울 내용이 없습니다'); return; }
   for (const id of ids) findStroke(id).gone = true;
   history.push({ kind: 'clear', ids }); redoStack = [];
-  redrawAll(); toast('전체 지움');
+  rebuildBase(); toast('전체 지움');
 }
 
 /* ---------------- 툴바 (부채꼴) ---------------- */
