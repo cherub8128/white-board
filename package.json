@@ -1,6 +1,6 @@
 {
   "name": "whiteboard-pen",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Windows floating annotation (pen) overlay for electronic whiteboards",
   "main": "main.js",
   "scripts": {

@@ -7,6 +7,11 @@ const RELEASES_URL = 'https://github.com/' + REPO + '/releases';
 
 // GPU 가속 + 부드러운 합성 (전자칠판 OPS 환경에서 안정적인 옵션)
 app.commandLine.appendSwitch('enable-features', 'CalculateNativeWinOcclusion');
+// 시작 속도: 불필요한 서브시스템을 끄고 오버레이가 백그라운드로 판정돼 느려지지 않게 한다
+app.commandLine.appendSwitch('disable-features',
+  'HardwareMediaKeyHandling,MediaSessionService,SpareRendererForSitePerProcess');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
 
 let win = null;
 
@@ -28,20 +33,28 @@ function createWindow() {
     hasShadow: false,
     backgroundColor: '#00000000',
     alwaysOnTop: true,
+    show: false,                 // 첫 페인트가 끝난 뒤 한 번에 표시 (깜빡임 없이 더 빨리 뜬다)
+    paintWhenInitiallyHidden: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      backgroundThrottling: false
+      backgroundThrottling: false,
+      spellcheck: false,
+      v8CacheOptions: 'code'
     }
   });
 
-  win.setAlwaysOnTop(true, 'screen-saver');
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
   // 시작은 "마우스 모드" = 클릭 통과
   win.setIgnoreMouseEvents(true, { forward: true });
+
+  win.once('ready-to-show', () => {
+    win.show();
+    win.setAlwaysOnTop(true, 'screen-saver');
+    setupBackgroundTasks();     // 창이 뜬 뒤에 단축키·업데이트 확인을 준비한다
+  });
 
   win.on('closed', () => { win = null; });
 }
@@ -114,12 +127,8 @@ ipcMain.on('check-update', () => checkUpdate(true));
 ipcMain.on('quit-app', () => app.quit());
 ipcMain.on('minimize-app', () => { if (win) win.minimize(); });
 
-app.whenReady().then(() => {
-  createWindow();
-
-  // 시작 5초 후 자동 업데이트 확인
-  setTimeout(() => checkUpdate(false), 5000);
-
+/* 창이 화면에 뜬 뒤에 실행되는 준비 작업 — 시작 경로에서 빼내 첫 표시를 앞당긴다 */
+function setupBackgroundTasks() {
   // 전역 단축키: 펜/마우스 즉시 전환, 전체 지우기
   globalShortcut.register('Alt+P', () => win && win.webContents.send('shortcut', 'toggle-mode'));
   globalShortcut.register('Alt+X', () => win && win.webContents.send('shortcut', 'clear'));
@@ -129,13 +138,18 @@ app.whenReady().then(() => {
   // 디스플레이 변경 시 창 크기 재조정
   const resize = () => {
     if (!win) return;
-    const b = screen.getPrimaryDisplay().bounds;
-    win.setBounds(b);
+    win.setBounds(screen.getPrimaryDisplay().bounds);
     win.webContents.send('shortcut', 'resize');
   };
   screen.on('display-metrics-changed', resize);
   screen.on('display-added', resize);
   screen.on('display-removed', resize);
+
+  setTimeout(() => checkUpdate(false), 8000);   // 자동 업데이트 확인
+}
+
+app.whenReady().then(() => {
+  createWindow();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

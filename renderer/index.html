@@ -12,12 +12,7 @@
   <div id="dock" class="dock">
     <div id="fanPanel" class="fan-panel"></div>
     <div id="fan" class="fan"></div>
-    <button id="handle" class="handle" title="드래그로 이동 · 눌러서 열기">
-      <svg viewBox="0 0 24 24" width="26" height="26"><path d="M3 21l3.6-1 11-11a2.1 2.1 0 0 0-3-3l-11 11L3 21z" fill="currentColor"/></svg>
-    </button>
-  </div>
-
-  <!-- 하단 색상 선택 패널 -->
+  <!-- 색상 선택 패널 (부채꼴 아래 부착) -->
   <div id="colorPanel" class="color-panel">
     <canvas id="svArea" width="240" height="150"></canvas>
     <div class="hue-wrap">
@@ -26,19 +21,18 @@
     <div class="color-meta">
       <i id="colorSwatch"></i>
       <b id="colorHex">#FF3B30</b>
-      <div class="rgb-rows">
-        <label>R<input id="rIn" type="number" min="0" max="255" /></label>
-        <label>G<input id="gIn" type="number" min="0" max="255" /></label>
-        <label>B<input id="bIn" type="number" min="0" max="255" /></label>
-      </div>
     </div>
   </div>
 
-  <!-- 하단 두께 슬라이더 -->
+  <!-- 두께 슬라이더 (부채꼴 아래 부착) -->
   <div id="slider" class="slider-bar">
     <div class="slider-head"><span id="sizeLabel">두께</span><b id="sizeValue">6</b></div>
     <input id="sizeRange" type="range" min="1" max="60" value="6" />
     <div class="preview"><i id="sizeDot"></i></div>
+  </div>
+    <button id="handle" class="handle" title="드래그로 이동 · 눌러서 열기">
+      <svg viewBox="0 0 24 24" width="26" height="26"><path d="M3 21l3.6-1 11-11a2.1 2.1 0 0 0-3-3l-11 11L3 21z" fill="currentColor"/></svg>
+    </button>
   </div>
 
   <!-- 정보 / 업데이트 모달 -->

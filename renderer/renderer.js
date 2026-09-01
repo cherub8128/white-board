@@ -353,16 +353,74 @@ function render() {
   handle.classList.toggle('mouse-mode', S.tool === 'mouse' || !S.screenLock);
   if (!S.fanOpen) { pod.classList.remove('show'); return; }
 
-  const toRight = dock.offsetLeft < window.innerWidth / 2;
-  const center = toRight ? 0 : 180;
-  dock.classList.toggle('flip', !toRight);
+  const dir = dockDirection();
+  clampDock(dir);
+  for (const d of ['right', 'left', 'up', 'down']) dock.classList.toggle('dir-' + d, d === dir);
+  const center = { right: 0, left: 180, down: 90, up: -90 }[dir];
 
   const r1 = ring1(), r2 = ring2();
-  place(r1, 122, arcAngles(r1.length, center, 142));
-  if (r2.length) place(r2, 190, arcAngles(r2.length, center, 120));
+  place(r1, 101, arcAngles(r1.length, center, 142));
+  if (r2.length) place(r2, 157, arcAngles(r2.length, center, 120));
 
   updateSlider();
+  layoutPanels(dir);
   saveSettings();
+}
+
+/* 핸들 위치로 부착 방향 결정 — 화면 위/아래 가장자리에 가까우면 회전시켜 붙인다 */
+const EDGE = 150;
+function dockDirection() {
+  const x = dock.offsetLeft, y = dock.offsetTop;
+  if (y < EDGE) return 'down';
+  if (window.innerHeight - y < EDGE) return 'up';
+  return x < window.innerWidth / 2 ? 'right' : 'left';
+}
+
+/* 반원이 화면 밖으로 나가지 않도록 핸들 위치를 제한한다 */
+function clampDock(dir) {
+  const R = PANEL_R + 8;
+  const cl = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  if (dir === 'up' || dir === 'down') {
+    dock.style.left = cl(dock.offsetLeft, R, window.innerWidth - R) + 'px';
+  } else {
+    dock.style.top = cl(dock.offsetTop, R, window.innerHeight - R) + 'px';
+  }
+}
+
+/* 두께·색상 패널을 부채꼴에 붙여 배치한다 (부채꼴 폭과 같은 너비) */
+const PANEL_R = 194, PANEL_GAP = 10;
+function layoutPanels(dir) {
+  const w = PANEL_R;
+  let x, y;
+
+  if (dir === 'right' || dir === 'left') {
+    // 반원 아래에 세로로 붙인다
+    x = (dir === 'right') ? 0 : -PANEL_R;
+    y = PANEL_R + PANEL_GAP;
+  } else {
+    // 위/아래 가장자리에 붙었을 때는 반원 오른쪽에 나란히 둔다
+    x = PANEL_R + PANEL_GAP;
+    y = (dir === 'down') ? 0 : -PANEL_R;
+    if (dock.offsetLeft + x + w > window.innerWidth - 12) x = -PANEL_R - PANEL_GAP - w;
+  }
+
+  for (const el of [pod, colorPanel]) {
+    el.style.width = w + 'px';
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    if (el.classList.contains('show')) y += el.offsetHeight + PANEL_GAP;
+  }
+
+  // 아래로 넘치면 위쪽으로 접어 올린다
+  if (dir === 'right' || dir === 'left') {
+    const overflow = dock.offsetTop + y - (window.innerHeight - 12);
+    if (overflow > 0) {
+      for (const el of [pod, colorPanel]) {
+        el.style.top = (parseFloat(el.style.top) - overflow) + 'px';
+      }
+    }
+  }
+  if (S.pickerOpen) drawSV();
 }
 
 function place(items, radius, angles) {
@@ -390,18 +448,22 @@ function setTool(t) {
   if (t !== 'pen' && t !== 'highlighter') {
     S.pickerOpen = false;
     colorPanel.classList.remove('show');
-    pod.classList.remove('lifted');
   }
-  if (t === 'pen' || t === 'highlighter') S.submenu = 'color';
-  else if (t === 'eraser') S.submenu = 'eraser';
-  else S.submenu = null;
+  S.submenu = submenuForTool();
   if (t === 'mouse') toast('마우스 모드 — 아래 화면을 그대로 조작합니다');
   applyMode();
   render();
 }
 
+function submenuForTool() {
+  if (S.tool === 'pen' || S.tool === 'highlighter') return 'color';
+  if (S.tool === 'eraser') return 'eraser';
+  return null;
+}
+
 function toggleSubmenu(name) {
-  S.submenu = (S.submenu === name) ? null : name;
+  // 설정을 다시 누르면 메뉴가 사라지지 않고 현재 도구의 하위 메뉴로 돌아온다
+  S.submenu = (S.submenu === name) ? submenuForTool() : name;
   render();
 }
 
@@ -431,15 +493,13 @@ document.addEventListener('mousemove', (e) => {
   }
 });
 function overUI(x, y) {
-  const pad = S.fanOpen ? 264 : 46;
-  const inDock = x >= dock.offsetLeft - pad && x <= dock.offsetLeft + pad &&
-                 y >= dock.offsetTop - pad && y <= dock.offsetTop + pad;
-  if (inDock) return true;
-  for (const el of [pod, colorPanel]) {
-    if (!el.classList.contains('show')) continue;
+  const hit = (el) => {
     const r = el.getBoundingClientRect();
-    if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return true;
-  }
+    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+  };
+  if (hit(handle)) return true;
+  if (S.fanOpen && hit(fanPanel)) return true;
+  for (const el of [pod, colorPanel]) if (el.classList.contains('show') && hit(el)) return true;
   return false;
 }
 
@@ -536,9 +596,6 @@ const svCtx = svArea.getContext('2d');
 const hueRange = document.getElementById('hueRange');
 const colorSwatch = document.getElementById('colorSwatch');
 const colorHex = document.getElementById('colorHex');
-const rIn = document.getElementById('rIn');
-const gIn = document.getElementById('gIn');
-const bIn = document.getElementById('bIn');
 
 let hsv = { h: 0, s: 1, v: 1 };
 
@@ -569,6 +626,10 @@ function hex2rgb(h) {
 }
 
 function drawSV() {
+  const cssW = svArea.clientWidth || 208, cssH = svArea.clientHeight || 104;
+  if (svArea.width !== cssW || svArea.height !== cssH) {
+    svArea.width = cssW; svArea.height = cssH;
+  }
   const w = svArea.width, h = svArea.height;
   const base = hsv2rgb(hsv.h, 1, 1);
   svCtx.fillStyle = 'rgb(' + base.join(',') + ')';
@@ -592,14 +653,13 @@ function drawSV() {
   svCtx.strokeStyle = '#fff'; svCtx.lineWidth = 2; svCtx.stroke();
 }
 
-function applyPickedColor(pushToInputs) {
+function applyPickedColor() {
   const rgb = hsv2rgb(hsv.h, hsv.s, hsv.v);
   const h = hex(rgb);
   S.customColor = h;
   S.color = h;
   colorSwatch.style.background = h;
   colorHex.textContent = h;
-  if (pushToInputs) { rIn.value = rgb[0]; gIn.value = rgb[1]; bIn.value = rgb[2]; }
   drawSV();
 }
 
@@ -607,15 +667,15 @@ function setFromHex(h) {
   const [r, g, b] = hex2rgb(h);
   hsv = rgb2hsv(r, g, b);
   hueRange.value = Math.round(hsv.h);
-  applyPickedColor(true);
+  applyPickedColor();
 }
 
 function toggleColorPicker() {
   S.pickerOpen = !S.pickerOpen;
   if (S.pickerOpen) setFromHex(S.customColor);
   colorPanel.classList.toggle('show', S.pickerOpen);
-  pod.classList.toggle('lifted', S.pickerOpen);
   render();
+  requestAnimationFrame(() => { layoutPanels(dockDirection()); drawSV(); });
 }
 
 let svDrag = false;
@@ -623,24 +683,15 @@ function pickSV(e) {
   const r = svArea.getBoundingClientRect();
   hsv.s = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
   hsv.v = 1 - Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
-  applyPickedColor(true);
+  applyPickedColor();
 }
 svArea.addEventListener('pointerdown', (e) => {
   svDrag = true; svArea.setPointerCapture(e.pointerId); pickSV(e); e.stopPropagation();
 });
 svArea.addEventListener('pointermove', (e) => { if (svDrag) { pickSV(e); e.stopPropagation(); } });
 svArea.addEventListener('pointerup', (e) => { svDrag = false; render(); e.stopPropagation(); });
-hueRange.addEventListener('input', () => { hsv.h = Number(hueRange.value); applyPickedColor(true); });
+hueRange.addEventListener('input', () => { hsv.h = Number(hueRange.value); applyPickedColor(); });
 hueRange.addEventListener('change', render);
-for (const el of [rIn, gIn, bIn]) {
-  el.addEventListener('input', () => {
-    const v = (x) => Math.min(255, Math.max(0, Number(x.value) || 0));
-    hsv = rgb2hsv(v(rIn), v(gIn), v(bIn));
-    hueRange.value = Math.round(hsv.h);
-    applyPickedColor(false);
-  });
-  el.addEventListener('change', render);
-}
 colorPanel.addEventListener('pointerdown', (e) => e.stopPropagation());
 
 /* ---------------- 모달 (정보 / 업데이트) ---------------- */
