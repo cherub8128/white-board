@@ -1,0 +1,70 @@
+{
+  "name": "whiteboard-pen",
+  "version": "1.0.0",
+  "description": "Windows floating annotation (pen) overlay for electronic whiteboards",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --x64",
+    "license-check": "node scripts/license-check.js"
+  },
+  "author": "cherub8128 (https://pi-dimension.com)",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^32.2.6",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.songdo.whiteboardpen",
+    "productName": "WhiteboardPen",
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**",
+      "LICENSE"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "판서 (WhiteboardPen)",
+      "artifactName": "WhiteboardPen-Setup-${version}.exe"
+    },
+    "portable": {
+      "artifactName": "WhiteboardPen-Portable-${version}.exe"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "cherub8128",
+        "repo": "white-board"
+      }
+    ]
+  },
+  "homepage": "https://pi-dimension.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cherub8128/white-board.git"
+  }
+}
