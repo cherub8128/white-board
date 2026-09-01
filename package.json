@@ -1,12 +1,13 @@
 {
   "name": "whiteboard-pen",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Windows floating annotation (pen) overlay for electronic whiteboards",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --win --x64",
-    "license-check": "node scripts/license-check.js"
+    "license-check": "node scripts/license-check.js",
+    "icon": "python scripts/make-icon.py"
   },
   "author": "cherub8128 (https://pi-dimension.com)",
   "license": "MIT",
@@ -21,7 +22,8 @@
       "main.js",
       "preload.js",
       "renderer/**",
-      "LICENSE"
+      "LICENSE",
+      "build/icon.ico"
     ],
     "directories": {
       "output": "dist"
@@ -40,7 +42,8 @@
             "x64"
           ]
         }
-      ]
+      ],
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -49,7 +52,10 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "판서 (WhiteboardPen)",
-      "artifactName": "WhiteboardPen-Setup-${version}.exe"
+      "artifactName": "WhiteboardPen-Setup-${version}.exe",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
     },
     "portable": {
       "artifactName": "WhiteboardPen-Portable-${version}.exe"

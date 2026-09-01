@@ -11,6 +11,7 @@ const ctx = canvas.getContext('2d', { desynchronized: true });
 
 const dock = document.getElementById('dock');
 const fan = document.getElementById('fan');
+const fanPanel = document.getElementById('fanPanel');
 const handle = document.getElementById('handle');
 const pod = document.getElementById('slider');
 const sizeRange = document.getElementById('sizeRange');
@@ -26,6 +27,8 @@ const S = {
   tool: 'pen',              // pen | highlighter | eraser | mouse
   eraserMode: 'stroke',     // stroke | area | all
   color: '#ff3b30',
+  customColor: '#8a4dff',   // 기타 색(RGB 패널에서 고른 색)
+  pickerOpen: false,
   penSize: 6,
   hiSize: 24,
   eraserSize: 40,
@@ -58,7 +61,10 @@ function resizeCanvas() {
   ctx.lineJoin = 'round';
   redrawAll();
 }
-window.addEventListener('resize', resizeCanvas);
+window.addEventListener('resize', () => {
+  resizeCanvas();
+  render();          // 화면 크기가 바뀌면 부채꼴 방향도 다시 계산
+});
 
 function widthAt(st, p) {
   if (st.tool === 'pen') return Math.max(0.6, st.size * (0.45 + 1.1 * (p.p === undefined ? 0.5 : p.p)));
@@ -268,14 +274,14 @@ function clearAll() {
 
 /* ---------------- 툴바 (부채꼴) ---------------- */
 const ICON = {
-  pen: '<svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 21l3.6-1 11-11a2.1 2.1 0 0 0-3-3l-11 11L3 21z" fill="currentColor"/></svg>',
-  hi: '<svg viewBox="0 0 24 24" width="22" height="22"><path d="M5 17l-1 4 4-1 10-10-3-3L5 17z" fill="currentColor" opacity=".9"/><rect x="3" y="21" width="18" height="2" rx="1" fill="currentColor"/></svg>',
-  eraser: '<svg viewBox="0 0 24 24" width="22" height="22"><path d="M6 18l-3-3a2 2 0 0 1 0-3l8-8a2 2 0 0 1 3 0l5 5a2 2 0 0 1 0 3l-6 6H6z" fill="currentColor"/><rect x="3" y="20" width="18" height="2" rx="1" fill="currentColor" opacity=".6"/></svg>',
-  mouse: '<svg viewBox="0 0 24 24" width="22" height="22"><path d="M5 3l14 8-6 1.4L10 20 5 3z" fill="currentColor"/></svg>',
-  undo: '<svg viewBox="0 0 24 24" width="22" height="22"><path d="M9 7h5a6 6 0 0 1 0 12h-4v-2h4a4 4 0 0 0 0-8H9v3L4 8l5-4v3z" fill="currentColor"/></svg>',
-  redo: '<svg viewBox="0 0 24 24" width="22" height="22"><path d="M15 7h-5a6 6 0 0 0 0 12h4v-2h-4a4 4 0 0 1 0-8h5v3l5-4-5-4v3z" fill="currentColor"/></svg>',
-  gear: '<svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zm9.4 4.9l-2 1.2.3 2.3-2.2 1.3-1.8-1.5-2.2.9-.7 2.9h-2.6l-.7-2.9-2.2-.9-1.8 1.5-2.2-1.3.3-2.3-2-1.2v-2.6l2-1.2-.3-2.3 2.2-1.3 1.8 1.5 2.2-.9.7-2.9h2.6l.7 2.9 2.2.9 1.8-1.5 2.2 1.3-.3 2.3 2 1.2z" fill="currentColor"/></svg>',
-  info: '<svg viewBox="0 0 24 24" width="22" height="22"><circle cx="12" cy="12" r="9.2" fill="none" stroke="currentColor" stroke-width="1.9"/><circle cx="12" cy="7.6" r="1.25" fill="currentColor"/><rect x="11" y="10.4" width="2" height="7" rx="1" fill="currentColor"/></svg>',
+  pen: '<svg viewBox="0 0 24 24" width="26" height="26"><path d="M3 21l3.6-1 11-11a2.1 2.1 0 0 0-3-3l-11 11L3 21z" fill="currentColor"/></svg>',
+  hi: '<svg viewBox="0 0 24 24" width="26" height="26"><path d="M5 17l-1 4 4-1 10-10-3-3L5 17z" fill="currentColor" opacity=".9"/><rect x="3" y="21" width="18" height="2" rx="1" fill="currentColor"/></svg>',
+  eraser: '<svg viewBox="0 0 24 24" width="26" height="26"><path d="M6 18l-3-3a2 2 0 0 1 0-3l8-8a2 2 0 0 1 3 0l5 5a2 2 0 0 1 0 3l-6 6H6z" fill="currentColor"/><rect x="3" y="20" width="18" height="2" rx="1" fill="currentColor" opacity=".6"/></svg>',
+  mouse: '<svg viewBox="0 0 24 24" width="26" height="26"><path d="M5 3l14 8-6 1.4L10 20 5 3z" fill="currentColor"/></svg>',
+  undo: '<svg viewBox="0 0 24 24" width="26" height="26"><path d="M9 7h5a6 6 0 0 1 0 12h-4v-2h4a4 4 0 0 0 0-8H9v3L4 8l5-4v3z" fill="currentColor"/></svg>',
+  redo: '<svg viewBox="0 0 24 24" width="26" height="26"><path d="M15 7h-5a6 6 0 0 0 0 12h4v-2h-4a4 4 0 0 1 0-8h5v3l5-4-5-4v3z" fill="currentColor"/></svg>',
+  gear: '<svg viewBox="0 0 24 24" width="26" height="26"><path fill-rule="evenodd" d="M19.49 10.2 L22.27 10.37 L22.27 13.63 L19.49 13.8 L18.57 16.02 L20.41 18.11 L18.11 20.41 L16.02 18.57 L13.8 19.49 L13.63 22.27 L10.37 22.27 L10.2 19.49 L7.98 18.57 L5.89 20.41 L3.59 18.11 L5.43 16.02 L4.51 13.8 L1.73 13.63 L1.73 10.37 L4.51 10.2 L5.43 7.98 L3.59 5.89 L5.89 3.59 L7.98 5.43 L10.2 4.51 L10.37 1.73 L13.63 1.73 L13.8 4.51 L16.02 5.43 L18.11 3.59 L20.41 5.89 L18.57 7.98 Z M8.5 12 A 3.5 3.5 0 1 0 15.5 12 A 3.5 3.5 0 1 0 8.5 12 Z" fill="currentColor"/></svg>',
+  info: '<svg viewBox="0 0 24 24" width="26" height="26"><circle cx="12" cy="12" r="9.2" fill="none" stroke="currentColor" stroke-width="1.9"/><circle cx="12" cy="7.6" r="1.25" fill="currentColor"/><rect x="11" y="10.4" width="2" height="7" rx="1" fill="currentColor"/></svg>',
   close: '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>'
 };
 
@@ -296,10 +302,17 @@ function ring1() {
 }
 
 function ring2() {
-  if (S.submenu === 'color')
-    return COLORS.map(c => item('c' + c, '<i style="background:' + c + '"></i>', '', () => {
-      S.color = c; render();
+  if (S.submenu === 'color') {
+    const swatches = COLORS.map(c => item('c' + c, '<i style="background:' + c + '"></i>', '', () => {
+      S.color = c; S.pickerOpen = false; render();
     }, { cls: 'color', activeIf: () => S.color === c }));
+    swatches.push(item('custom',
+      '<i style="background:conic-gradient(#ff3b30,#ffcc00,#34c759,#0ad,#4c8dff,#b45cff,#ff3b30);' +
+      'box-shadow:inset 0 0 0 2px ' + S.customColor + '"></i>',
+      '기타 색 (RGB 선택)', toggleColorPicker,
+      { cls: 'color', activeIf: () => S.pickerOpen || S.color === S.customColor }));
+    return swatches;
+  }
 
   if (S.submenu === 'eraser')
     return [
@@ -335,16 +348,18 @@ function arcAngles(count, centerDeg, spreadDeg) {
 function render() {
   fan.innerHTML = '';
   fan.classList.toggle('open', S.fanOpen);
+  fanPanel.classList.toggle('open', S.fanOpen);
   handle.classList.toggle('open', S.fanOpen);
   handle.classList.toggle('mouse-mode', S.tool === 'mouse' || !S.screenLock);
   if (!S.fanOpen) { pod.classList.remove('show'); return; }
 
   const toRight = dock.offsetLeft < window.innerWidth / 2;
   const center = toRight ? 0 : 180;
+  dock.classList.toggle('flip', !toRight);
 
   const r1 = ring1(), r2 = ring2();
-  place(r1, 108, arcAngles(r1.length, center, 150));
-  if (r2.length) place(r2, 180, arcAngles(r2.length, center, 124));
+  place(r1, 122, arcAngles(r1.length, center, 142));
+  if (r2.length) place(r2, 190, arcAngles(r2.length, center, 120));
 
   updateSlider();
   saveSettings();
@@ -372,6 +387,11 @@ function place(items, radius, angles) {
 
 function setTool(t) {
   S.tool = t;
+  if (t !== 'pen' && t !== 'highlighter') {
+    S.pickerOpen = false;
+    colorPanel.classList.remove('show');
+    pod.classList.remove('lifted');
+  }
   if (t === 'pen' || t === 'highlighter') S.submenu = 'color';
   else if (t === 'eraser') S.submenu = 'eraser';
   else S.submenu = null;
@@ -404,19 +424,23 @@ function applyMode() {
 let overDock = false;
 document.addEventListener('mousemove', (e) => {
   if (captureInput() || S.modalOpen) return;
-  const r = dockHitRect();
-  const inside = e.clientX >= r.l && e.clientX <= r.r && e.clientY >= r.t && e.clientY <= r.b;
+  const inside = overUI(e.clientX, e.clientY);
   if (inside !== overDock) {
     overDock = inside;
     window.overlay.setClickThrough(!inside);
   }
 });
-function dockHitRect() {
-  const pad = S.fanOpen ? 240 : 46;
-  return {
-    l: dock.offsetLeft - pad, r: dock.offsetLeft + pad,
-    t: dock.offsetTop - pad, b: dock.offsetTop + pad
-  };
+function overUI(x, y) {
+  const pad = S.fanOpen ? 264 : 46;
+  const inDock = x >= dock.offsetLeft - pad && x <= dock.offsetLeft + pad &&
+                 y >= dock.offsetTop - pad && y <= dock.offsetTop + pad;
+  if (inDock) return true;
+  for (const el of [pod, colorPanel]) {
+    if (!el.classList.contains('show')) continue;
+    const r = el.getBoundingClientRect();
+    if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return true;
+  }
+  return false;
 }
 
 /* ---------------- 두께 슬라이더 ---------------- */
@@ -433,9 +457,6 @@ const SLIDER_MIN = { penSize: 1, hiSize: 4, eraserSize: 8, palmThreshold: 30 };
 function updateSlider() {
   const key = currentSizeKey();
   if (!S.fanOpen || !key) { pod.classList.remove('show'); return; }
-  const toRight = dock.offsetLeft < window.innerWidth / 2;
-  pod.style.left = (toRight ? 96 : -306) + 'px';
-  pod.style.top = '-160px';
   pod.classList.add('show');
 
   sizeRange.min = SLIDER_MIN[key];
@@ -507,6 +528,120 @@ window.addEventListener('keydown', (e) => {
   if (e.ctrlKey && k === 'y') { e.preventDefault(); redo(); }
   if (e.key === 'Escape') { if (S.modalOpen) closeModal(); else { S.fanOpen = false; render(); } }
 });
+
+/* ---------------- RGB 색 선택 패널 ---------------- */
+const colorPanel = document.getElementById('colorPanel');
+const svArea = document.getElementById('svArea');
+const svCtx = svArea.getContext('2d');
+const hueRange = document.getElementById('hueRange');
+const colorSwatch = document.getElementById('colorSwatch');
+const colorHex = document.getElementById('colorHex');
+const rIn = document.getElementById('rIn');
+const gIn = document.getElementById('gIn');
+const bIn = document.getElementById('bIn');
+
+let hsv = { h: 0, s: 1, v: 1 };
+
+function hsv2rgb(h, s, v) {
+  const c = v * s, x = c * (1 - Math.abs((h / 60) % 2 - 1)), m = v - c;
+  const t = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][Math.floor(h / 60) % 6];
+  return t.map(n => Math.round((n + m) * 255));
+}
+function rgb2hsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0;
+  if (d) {
+    if (mx === r) h = 60 * (((g - b) / d) % 6);
+    else if (mx === g) h = 60 * ((b - r) / d + 2);
+    else h = 60 * ((r - g) / d + 4);
+  }
+  return { h: (h + 360) % 360, s: mx ? d / mx : 0, v: mx };
+}
+function hex(rgb) {
+  return '#' + rgb.map(n => n.toString(16).padStart(2, '0')).join('').toUpperCase();
+}
+function hex2rgb(h) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(h);
+  if (!m) return [255, 59, 48];
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function drawSV() {
+  const w = svArea.width, h = svArea.height;
+  const base = hsv2rgb(hsv.h, 1, 1);
+  svCtx.fillStyle = 'rgb(' + base.join(',') + ')';
+  svCtx.fillRect(0, 0, w, h);
+
+  const white = svCtx.createLinearGradient(0, 0, w, 0);
+  white.addColorStop(0, 'rgba(255,255,255,1)');
+  white.addColorStop(1, 'rgba(255,255,255,0)');
+  svCtx.fillStyle = white; svCtx.fillRect(0, 0, w, h);
+
+  const black = svCtx.createLinearGradient(0, 0, 0, h);
+  black.addColorStop(0, 'rgba(0,0,0,0)');
+  black.addColorStop(1, 'rgba(0,0,0,1)');
+  svCtx.fillStyle = black; svCtx.fillRect(0, 0, w, h);
+
+  // 현재 위치 표시
+  const x = hsv.s * w, y = (1 - hsv.v) * h;
+  svCtx.beginPath();
+  svCtx.arc(x, y, 7, 0, Math.PI * 2);
+  svCtx.strokeStyle = 'rgba(0,0,0,.55)'; svCtx.lineWidth = 3; svCtx.stroke();
+  svCtx.strokeStyle = '#fff'; svCtx.lineWidth = 2; svCtx.stroke();
+}
+
+function applyPickedColor(pushToInputs) {
+  const rgb = hsv2rgb(hsv.h, hsv.s, hsv.v);
+  const h = hex(rgb);
+  S.customColor = h;
+  S.color = h;
+  colorSwatch.style.background = h;
+  colorHex.textContent = h;
+  if (pushToInputs) { rIn.value = rgb[0]; gIn.value = rgb[1]; bIn.value = rgb[2]; }
+  drawSV();
+}
+
+function setFromHex(h) {
+  const [r, g, b] = hex2rgb(h);
+  hsv = rgb2hsv(r, g, b);
+  hueRange.value = Math.round(hsv.h);
+  applyPickedColor(true);
+}
+
+function toggleColorPicker() {
+  S.pickerOpen = !S.pickerOpen;
+  if (S.pickerOpen) setFromHex(S.customColor);
+  colorPanel.classList.toggle('show', S.pickerOpen);
+  pod.classList.toggle('lifted', S.pickerOpen);
+  render();
+}
+
+let svDrag = false;
+function pickSV(e) {
+  const r = svArea.getBoundingClientRect();
+  hsv.s = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+  hsv.v = 1 - Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+  applyPickedColor(true);
+}
+svArea.addEventListener('pointerdown', (e) => {
+  svDrag = true; svArea.setPointerCapture(e.pointerId); pickSV(e); e.stopPropagation();
+});
+svArea.addEventListener('pointermove', (e) => { if (svDrag) { pickSV(e); e.stopPropagation(); } });
+svArea.addEventListener('pointerup', (e) => { svDrag = false; render(); e.stopPropagation(); });
+hueRange.addEventListener('input', () => { hsv.h = Number(hueRange.value); applyPickedColor(true); });
+hueRange.addEventListener('change', render);
+for (const el of [rIn, gIn, bIn]) {
+  el.addEventListener('input', () => {
+    const v = (x) => Math.min(255, Math.max(0, Number(x.value) || 0));
+    hsv = rgb2hsv(v(rIn), v(gIn), v(bIn));
+    hueRange.value = Math.round(hsv.h);
+    applyPickedColor(false);
+  });
+  el.addEventListener('change', render);
+}
+colorPanel.addEventListener('pointerdown', (e) => e.stopPropagation());
 
 /* ---------------- 모달 (정보 / 업데이트) ---------------- */
 const modal = document.getElementById('modal');
@@ -584,7 +719,7 @@ function toast(msg) {
 
 /* ---------------- 설정 저장 ---------------- */
 const SAVED_KEYS = ['tool', 'eraserMode', 'color', 'penSize', 'hiSize', 'eraserSize',
-  'touchWrite', 'palmErase', 'palmThreshold'];
+  'touchWrite', 'palmErase', 'palmThreshold', 'customColor'];
 
 function saveSettings() {
   try {
@@ -609,6 +744,9 @@ function loadSettings() {
 /* ---------------- 시작 ---------------- */
 loadSettings();
 resizeCanvas();
+const savedColor = S.color;
+setFromHex(S.customColor);      // 선택기 UI를 저장된 커스텀 색으로 맞춘다
+S.color = savedColor;
 setTool(S.tool);
 S.fanOpen = true;
 render();
