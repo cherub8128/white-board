@@ -33,6 +33,9 @@ function createOverlay() {
     minimizable: false, maximizable: false, fullscreenable: false,
     hasShadow: false, backgroundColor: '#00000000',
     alwaysOnTop: true, skipTaskbar: false, show: false, paintWhenInitiallyHidden: true,
+    // 그리려고 누를 때마다 창이 활성화되면 툴바 위로 올라가 버린다.
+    // 비활성 창으로 두면 포인터 입력은 그대로 받으면서 z-order 는 그대로 유지된다.
+    focusable: false,
     icon: path.join(__dirname, 'build', 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -82,21 +85,42 @@ function createToolbar() {
 /* ---------------- 창 사이 중계 ---------------- */
 
 // 툴바가 계산한 UI 영역에 맞춰 툴바 창을 옮긴다 (보이는 부분만 클릭을 받도록 최소 크기로)
+let lastBounds = null;
 ipcMain.on('toolbar-bounds', (_e, b) => {
   if (!toolWin) return;
-  const d = screen.getPrimaryDisplay().workArea;
-  const width = Math.max(1, Math.round(b.width));
-  const height = Math.max(1, Math.round(b.height));
-  const x = Math.round(Math.min(Math.max(b.x, d.x - 8), d.x + d.width - width + 8));
-  const y = Math.round(Math.min(Math.max(b.y, d.y - 8), d.y + d.height - height + 8));
-  toolWin.setBounds({ x, y, width, height });
+  const nb = {
+    x: Math.round(b.x), y: Math.round(b.y),
+    width: Math.max(1, Math.round(b.width)), height: Math.max(1, Math.round(b.height))
+  };
+  if (lastBounds && nb.x === lastBounds.x && nb.y === lastBounds.y &&
+      nb.width === lastBounds.width && nb.height === lastBounds.height) return;   // 같은 값 재설정 방지
+  lastBounds = nb;
+  toolWin.setBounds(nb);
+  toolWin.moveTop();
 });
 
 // 오버레이가 입력을 받을지 (펜 모드 = 받음, 마우스/통과 모드 = 통과)
 ipcMain.on('overlay-interactive', (_e, interactive) => {
   if (!overlayWin) return;
   overlayWin.setIgnoreMouseEvents(!interactive);
-  if (toolWin) toolWin.moveTop();     // 툴바는 항상 클릭을 받아야 한다
+  raiseToolbar();
+});
+
+/* 툴바는 어떤 경우에도 오버레이 위에 있어야 클릭을 받는다.
+ * 다른 앱이 z-order 를 흔드는 경우가 있어 획이 끝날 때마다, 그리고 주기적으로 다시 올린다. */
+function raiseToolbar() {
+  if (!toolWin || toolWin.isDestroyed()) return;
+  toolWin.setAlwaysOnTop(true, 'screen-saver');
+  toolWin.moveTop();
+}
+ipcMain.on('raise-toolbar', raiseToolbar);
+
+// 모달을 띄울 때만 오버레이가 키보드를 받도록 (Esc 로 닫기)
+ipcMain.on('overlay-focusable', (_e, on) => {
+  if (!overlayWin) return;
+  overlayWin.setFocusable(!!on);
+  if (on) overlayWin.focus();
+  raiseToolbar();
 });
 
 // 툴바 -> 오버레이 (도구 상태, 명령)
@@ -184,6 +208,7 @@ function setupBackgroundTasks() {
   screen.on('display-removed', resize);
 
   setTimeout(() => checkUpdate(false), 8000);
+  setInterval(raiseToolbar, 2000);     // z-order 보험
 }
 
 app.whenReady().then(() => {

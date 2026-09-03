@@ -229,6 +229,7 @@ function finishStroke(pointerId) {
   const a = active.get(pointerId);
   if (!a) return;
   active.delete(pointerId);
+  window.pipen.raiseToolbar();      // 그리는 동안 z-order 가 흔들려도 툴바가 계속 눌리도록
 
   if (a.kind === 'eraseStroke') {
     if (a.removed.length) { history.push({ kind: 'erase', ids: a.removed.slice() }); redoStack = []; }
@@ -326,12 +327,14 @@ function openModal(title, bodyHtml, actions) {
   });
   S.modalOpen = true;
   modal.classList.add('show');
+  window.pipen.setOverlayFocusable(true);
   applyMode();
 }
 
 function closeModal() {
   S.modalOpen = false;
   modal.classList.remove('show');
+  window.pipen.setOverlayFocusable(false);
   applyMode();
 }
 modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });

@@ -145,8 +145,9 @@ function submenuForTool() {
  * (창을 UI 크기에 딱 맞춰야 주변 클릭이 막히지 않는다) */
 function dockDirection() {
   const w = window.screen.availWidth, h = window.screen.availHeight;
-  if (dockScreen.y < R + 40) return 'down';
-  if (h - dockScreen.y < R + 40) return 'up';
+  // 위/아래 가장자리에 가까우면 그쪽으로 눕히고, 아니면 화면 안쪽을 향해 펼친다
+  if (dockScreen.y < R) return 'down';
+  if (h - dockScreen.y < R) return 'up';
   return dockScreen.x < w / 2 ? 'right' : 'left';
 }
 
@@ -221,7 +222,7 @@ function render() {
     if (r2.length) place(r2, 157, arcAngles(r2.length, center, 120));
   }
 
-  layout();          // 슬라이더 표시 여부가 바뀌었을 수 있으므로 한 번 더
+  requestAnimationFrame(layout);   // 패널 표시 여부가 바뀐 뒤의 실제 크기로 한 번 더
   saveSettings();
 }
 
@@ -244,8 +245,10 @@ function place(items, radius, angles) {
 }
 
 function clampDock() {
+  // 핸들만 화면 안에 있으면 된다. 반원은 가장자리 반대쪽으로 펼쳐지므로
+  // 여기서 반지름만큼 여백을 두면 화면 끝까지 붙일 수가 없다.
   const w = window.screen.availWidth, h = window.screen.availHeight;
-  const pad = S.fanOpen ? R + 8 : HANDLE + 8;
+  const pad = HANDLE + 2;
   dockScreen.x = Math.min(Math.max(dockScreen.x, pad), w - pad);
   dockScreen.y = Math.min(Math.max(dockScreen.y, pad), h - pad);
 }
@@ -424,21 +427,37 @@ handle.addEventListener('pointermove', (e) => {
   clampDock();
   layout();
 });
-/* 일부 환경에서 탭 한 번이 이벤트 두 번으로 들어와 열자마자 닫히는 일이 있어,
- * 아주 짧은 간격의 연속 토글은 무시한다 */
+/* 토글은 click 한 곳에서만 처리한다.
+ * 이 창은 비활성 창(focusable:false)이라 탭/클릭 한 번이 포인터 이벤트 두 쌍으로
+ * 들어오는 환경이 있는데, pointerup 에서 토글하면 두 번 뒤집혀 "안 눌리는" 것처럼 보인다. */
 let lastToggle = 0;
-function handleUp(e) {
-  if (drag && !drag.moved) {
-    const now = Date.now();
-    if (now - lastToggle > 250) { lastToggle = now; S.fanOpen = !S.fanOpen; render(); }
-  }
-  else if (drag) { render(); }
-  drag = null;
-  if (e) e.stopPropagation();
+let suppressClick = false;
+
+function handleUp() {
+  const d = drag;
+  drag = null;                       // 어떤 경로로 끝나든 드래그 상태를 먼저 정리
+  if (d && d.moved) { suppressClick = true; render(); }
 }
 handle.addEventListener('pointerup', handleUp);
 handle.addEventListener('pointercancel', handleUp);
-handle.addEventListener('lostpointercapture', () => { if (drag) handleUp(null); });
+// 창 크기가 바뀌면서 포인터 캡처가 풀릴 수 있다. 이때는 토글하지 않고 상태만 정리한다.
+handle.addEventListener('lostpointercapture', () => { drag = null; });
+
+handle.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (suppressClick) { suppressClick = false; return; }   // 방금 드래그로 옮긴 경우
+  const now = Date.now();
+  if (now - lastToggle < 350) return;                     // 중복 전달 무시
+  lastToggle = now;
+  S.fanOpen = !S.fanOpen;
+  render();
+});
+
+/* 어떤 이유로든 창 크기와 모델이 어긋나면 되돌린다 (접었다 폈다를 반복할 때 보험) */
+setInterval(() => {
+  if (drag) return;
+  layout();
+}, 1500);
 
 /* ---------------- 설정 저장 ---------------- */
 const SAVED = ['tool', 'eraserMode', 'color', 'customColor', 'penSize', 'hiSize', 'eraserSize',
