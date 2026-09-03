@@ -2,10 +2,8 @@
 html,body { width:100%; height:100%; overflow:hidden; background:transparent;
   font-family:"Pretendard","Malgun Gothic",-apple-system,Segoe UI,sans-serif; }
 
-#board { position:fixed; inset:0; width:100%; height:100%; touch-action:none; }
-
 /* ===== 도크 (플로팅 핸들 + 반원 패널) ===== */
-.dock { position:fixed; left:60px; top:50%; width:0; height:0; z-index:10; --r:194px; }
+.dock { position:absolute; left:0; top:0; width:0; height:0; z-index:10; --r:194px; }
 
 .handle {
   position:absolute; left:-28px; top:-28px; width:56px; height:56px; border:none; border-radius:50%;
@@ -109,44 +107,3 @@ html,body { width:100%; height:100%; overflow:hidden; background:transparent;
   box-shadow:inset 0 0 0 1px rgba(255,255,255,.25); }
 .color-meta b { font-size:12px; letter-spacing:.4px; margin-left:auto; opacity:.85; }
 
-/* ===== 토스트 ===== */
-.toast {
-  position:fixed; left:50%; top:40px; transform:translateX(-50%) translateY(-10px);
-  padding:10px 18px; border-radius:999px; background:rgba(20,22,28,.9); color:#fff; font-size:14px;
-  opacity:0; transition:opacity .2s, transform .2s; pointer-events:none; z-index:20;
-  box-shadow:0 6px 24px rgba(0,0,0,.4);
-}
-.toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
-
-/* ===== 모달 (정보 / 업데이트) ===== */
-.modal-back {
-  position:fixed; inset:0; z-index:30; display:none;
-  align-items:center; justify-content:center; background:rgba(6,8,12,.45);
-  backdrop-filter:blur(3px);
-}
-.modal-back.show { display:flex; }
-.modal-card {
-  width:380px; max-width:86vw; padding:24px 26px 20px; border-radius:20px;
-  background:rgba(26,29,36,.98); color:#e8eaf0;
-  box-shadow:0 24px 70px rgba(0,0,0,.55), inset 0 0 0 1px rgba(255,255,255,.10);
-  animation:pop .22s cubic-bezier(.2,.9,.25,1);
-}
-@keyframes pop { from { opacity:0; transform:translateY(12px) scale(.96); } to { opacity:1; transform:none; } }
-.modal-card h3 { font-size:18px; font-weight:700; margin-bottom:12px; }
-.modal-body { font-size:14px; line-height:1.65; color:#c8cdd8; }
-.modal-body .row { display:flex; justify-content:space-between; gap:12px; padding:5px 0; }
-.modal-body .row span { color:#8f96a3; }
-.modal-body a { color:#6fa8ff; text-decoration:none; cursor:pointer; }
-.modal-body a:hover { text-decoration:underline; }
-.modal-body .notes {
-  margin-top:12px; max-height:170px; overflow:auto; white-space:pre-wrap;
-  font-size:13px; padding:10px 12px; border-radius:10px; background:rgba(0,0,0,.28); color:#b6bcc8;
-}
-.modal-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:18px; }
-.modal-actions button {
-  padding:9px 16px; border:none; border-radius:10px; font-size:14px; font-weight:600; cursor:pointer;
-  background:rgba(255,255,255,.10); color:#e8eaf0;
-}
-.modal-actions button:hover { background:rgba(255,255,255,.16); }
-.modal-actions button.primary { background:#3a78ff; color:#fff; }
-.modal-actions button.primary:hover { background:#5a8dff; }

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>Pi Pen Toolbar</title>
+<link rel="stylesheet" href="toolbar.css" />
+</head>
+<body>
+  <div id="dock" class="dock dir-right">
+    <div id="fanPanel" class="fan-panel"></div>
+    <div id="fan" class="fan"></div>
+
+    <div id="colorPanel" class="color-panel">
+      <canvas id="svArea" width="166" height="92"></canvas>
+      <div class="hue-wrap"><input id="hueRange" type="range" min="0" max="359" value="0" /></div>
+      <div class="color-meta"><i id="colorSwatch"></i><b id="colorHex">#FF3B30</b></div>
+    </div>
+
+    <div id="slider" class="slider-bar">
+      <div class="slider-head"><span id="sizeLabel">두께</span><b id="sizeValue">6</b></div>
+      <input id="sizeRange" type="range" min="1" max="60" value="6" />
+      <div class="preview"><i id="sizeDot"></i></div>
+    </div>
+
+    <button id="handle" class="handle" title="드래그로 이동 · 눌러서 열기">
+      <svg viewBox="0 0 24 24" width="26" height="26"><path d="M3 21l3.6-1 11-11a2.1 2.1 0 0 0-3-3l-11 11L3 21z" fill="currentColor"/></svg>
+    </button>
+  </div>
+  <script src="toolbar.js"></script>
+</body>
+</html>
