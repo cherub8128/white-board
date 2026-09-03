@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen, globalShortcut, shell, net } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, globalShortcut, shell, net, desktopCapturer } = require('electron');
 const path = require('path');
 
 const REPO = 'cherub8128/white-board';
@@ -33,9 +33,6 @@ function createOverlay() {
     minimizable: false, maximizable: false, fullscreenable: false,
     hasShadow: false, backgroundColor: '#00000000',
     alwaysOnTop: true, skipTaskbar: false, show: false, paintWhenInitiallyHidden: true,
-    // 그리려고 누를 때마다 창이 활성화되면 툴바 위로 올라가 버린다.
-    // 비활성 창으로 두면 포인터 입력은 그대로 받으면서 z-order 는 그대로 유지된다.
-    focusable: false,
     icon: path.join(__dirname, 'build', 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -188,6 +185,28 @@ function checkUpdate(manual) {
 }
 
 ipcMain.on('check-update', () => checkUpdate(true));
+
+/* ---------------- 화면 스냅샷 ----------------
+ * "자동 대비" 펜이 아래 화면의 색을 읽어 반전색을 고르기 위한 것.
+ * 투명 창은 아래 화면과 직접 블렌딩할 수 없어서, 화면을 작게 찍어 색을 샘플링한다. */
+let capturing = false;
+ipcMain.handle('capture-screen', async () => {
+  if (capturing) return null;
+  capturing = true;
+  try {
+    const d = screen.getPrimaryDisplay();
+    const w = 320;
+    const h = Math.max(1, Math.round(d.size.height / d.size.width * w));
+    const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: w, height: h } });
+    const src = sources.find(s => String(s.display_id) === String(d.id)) || sources[0];
+    if (!src || src.thumbnail.isEmpty()) return null;
+    return { dataURL: src.thumbnail.toDataURL(), width: w, height: h };
+  } catch (_) {
+    return null;             // 캡처 실패 시 자동 대비는 마지막 색을 유지한다
+  } finally {
+    capturing = false;
+  }
+});
 
 /* 창이 뜬 뒤에 실행되는 준비 작업 — 시작 경로에서 빼내 첫 표시를 앞당긴다 */
 function setupBackgroundTasks() {

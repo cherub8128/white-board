@@ -93,6 +93,11 @@ function ring2() {
     const sw = COLORS.map(c => item('c' + c, '<i style="background:' + c + '"></i>', '', () => {
       S.color = c; S.pickerOpen = false; colorPanel.classList.remove('show'); render(); pushState();
     }, { cls: 'color', activeIf: () => S.color === c }));
+    // 화면 색을 읽어 반전색으로 그리는 펜 — 어떤 배경에서도 잘 보인다
+    sw.push(item('auto', '<i class="auto-swatch"></i>', '자동 대비 (배경 반전색)', () => {
+      S.color = 'auto'; S.pickerOpen = false; colorPanel.classList.remove('show');
+      render(); pushState(); toast('자동 대비 — 배경색의 반전색으로 그립니다');
+    }, { cls: 'color', activeIf: () => S.color === 'auto' }));
     sw.push(item('custom',
       '<i style="background:conic-gradient(#ff3b30,#ffcc00,#34c759,#0ad,#4c8dff,#b45cff,#ff3b30);' +
       'box-shadow:inset 0 0 0 2px ' + S.customColor + '"></i>',
@@ -306,8 +311,11 @@ function updateSlider() {
   } else {
     sizeLabel.textContent = (key === 'eraserSize') ? '지우개 크기' : '두께';
     const d = Math.min(30, Math.max(3, S[key]));
-    sizeDot.style.cssText = 'width:' + d + 'px;height:' + d + 'px;background:' +
-      (key === 'eraserSize' ? '#9aa1ad' : S.color) + ';opacity:' + (key === 'hiSize' ? .5 : 1);
+    const dotColor = key === 'eraserSize' ? '#9aa1ad'
+      : (S.color === 'auto' ? 'linear-gradient(90deg,#111 50%,#f2f2f2 50%)' : S.color);
+    const prop = dotColor.startsWith('linear') ? 'background-image' : 'background';
+    sizeDot.style.cssText = 'width:' + d + 'px;height:' + d + 'px;' + prop + ':' + dotColor +
+      ';opacity:' + (key === 'hiSize' ? .5 : 1);
   }
 }
 

@@ -70,7 +70,7 @@ function renderStroke(c, st) {
 
   if (pts.length === 1) {
     c.beginPath();
-    c.fillStyle = st.color;
+    c.fillStyle = (st.auto && pts[0].c) ? pts[0].c : st.color;
     c.arc(pts[0].x, pts[0].y, widthAt(st, pts[0]) / 2, 0, Math.PI * 2);
     c.fill();
     c.restore();
@@ -81,6 +81,7 @@ function renderStroke(c, st) {
     // 필압에 따라 두께가 달라지므로 세그먼트 단위 (불투명이라 겹쳐도 티가 안 남)
     for (let i = 1; i < pts.length; i++) {
       const a = pts[i - 1], b = pts[i], prev = pts[i - 2] || a;
+      if (st.auto && b.c) c.strokeStyle = b.c;   // 배경이 바뀌면 획 색도 따라 바뀐다
       c.beginPath();
       c.lineWidth = (widthAt(st, a) + widthAt(st, b)) / 2;
       c.moveTo((prev.x + a.x) / 2, (prev.y + a.y) / 2);
@@ -136,6 +137,63 @@ function requestPaint() {
   paintFallback = setTimeout(() => { if (paintQueued) paintNow(); }, 120);
 }
 
+/* ---------------- 자동 대비 색 ----------------
+ * 아래 화면을 작게 찍어 두고, 획이 지나는 지점의 색을 읽어 반전색을 고른다.
+ * 반전색이 배경과 밝기가 비슷해 잘 안 보이는 경우(회색 계열)에는 검정/흰색으로 밀어낸다. */
+const bgCanvas = document.createElement('canvas');
+const bgCtx = bgCanvas.getContext('2d', { willReadFrequently: true });
+let bgData = null;
+let bgBusy = false;
+
+async function refreshBackdrop() {
+  if (bgBusy) return;
+  bgBusy = true;
+  try {
+    const shot = await window.pipen.captureScreen();
+    if (!shot) return;
+    const img = new Image();
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = shot.dataURL; });
+    bgCanvas.width = shot.width;
+    bgCanvas.height = shot.height;
+    bgCtx.drawImage(img, 0, 0, shot.width, shot.height);
+    bgData = bgCtx.getImageData(0, 0, shot.width, shot.height);
+  } catch (_) {
+    // 캡처 실패 — 직전 스냅샷을 그대로 쓴다
+  } finally {
+    bgBusy = false;
+  }
+}
+
+const lum = (r, g, b) => (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+
+function contrastColorAt(x, y) {
+  if (!bgData) return '#ff3b30';
+  const sx = Math.min(bgData.width - 1, Math.max(0, Math.round(x / window.innerWidth * bgData.width)));
+  const sy = Math.min(bgData.height - 1, Math.max(0, Math.round(y / window.innerHeight * bgData.height)));
+
+  // 주변 3x3 평균 — 글자 위 같은 잔무늬에서 색이 튀는 것을 막는다
+  let r = 0, g = 0, b = 0, n = 0;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const px = Math.min(bgData.width - 1, Math.max(0, sx + dx));
+      const py = Math.min(bgData.height - 1, Math.max(0, sy + dy));
+      const i = (py * bgData.width + px) * 4;
+      r += bgData.data[i]; g += bgData.data[i + 1]; b += bgData.data[i + 2]; n++;
+    }
+  }
+  r = Math.round(r / n); g = Math.round(g / n); b = Math.round(b / n);
+
+  const L = lum(r, g, b);
+  const ir = 255 - r, ig = 255 - g, ib = 255 - b;
+  if (Math.abs(lum(ir, ig, ib) - L) < 0.35) return L > 0.5 ? '#111111' : '#f2f2f2';
+  return '#' + [ir, ig, ib].map(v => v.toString(16).padStart(2, '0')).join('');
+}
+
+/* 자동 대비를 쓰는 동안에는 화면이 바뀌어도 따라가도록 주기적으로 다시 찍는다 */
+setInterval(() => {
+  if (S.color === 'auto' && active.size === 0) refreshBackdrop();
+}, 1500);
+
 /* ---------------- 입력 ---------------- */
 function captureInput() { return S.tool !== 'mouse' && S.screenLock; }
 
@@ -161,13 +219,17 @@ function makeStroke(kind, e) {
       ? Math.max(S.eraserSize, c * 1.6) : S.eraserSize;
     return { id, tool: 'eraser', color: '#000', size, alpha: 1, comp: 'destination-out', pts: [], gone: false };
   }
+  const auto = S.color === 'auto';
+  const color = auto ? contrastColorAt(e.clientX, e.clientY) : S.color;
   if (kind === 'highlighter')
-    return { id, tool: 'highlighter', color: S.color, size: S.hiSize, alpha: 0.32, comp: 'source-over', pts: [], gone: false };
-  return { id, tool: 'pen', color: S.color, size: S.penSize, alpha: 1, comp: 'source-over', pts: [], gone: false };
+    return { id, tool: 'highlighter', color, auto, size: S.hiSize, alpha: 0.32, comp: 'source-over', pts: [], gone: false };
+  return { id, tool: 'pen', color, auto, size: S.penSize, alpha: 1, comp: 'source-over', pts: [], gone: false };
 }
 
-function pointOf(e) {
-  return { x: e.clientX, y: e.clientY, p: e.pressure > 0 ? e.pressure : 0.5 };
+function pointOf(e, auto) {
+  const p = { x: e.clientX, y: e.clientY, p: e.pressure > 0 ? e.pressure : 0.5 };
+  if (auto) p.c = contrastColorAt(p.x, p.y);   // 지나는 지점마다 배경 반전색
+  return p;
 }
 
 canvas.addEventListener('pointerdown', (e) => {
@@ -191,7 +253,7 @@ canvas.addEventListener('pointerdown', (e) => {
   }
 
   const stroke = makeStroke(kind, e);
-  stroke.pts.push(pointOf(e));
+  stroke.pts.push(pointOf(e, stroke.auto));
   active.set(e.pointerId, { kind, stroke, t: Date.now() });
   requestPaint();
 }, { passive: false });
@@ -211,7 +273,7 @@ canvas.addEventListener('pointermove', (e) => {
 
   const st = a.stroke;
   for (const ev of events) {
-    const p = pointOf(ev);
+    const p = pointOf(ev, st.auto);
     const last = st.pts[st.pts.length - 1];
     if (Math.hypot(p.x - last.x, p.y - last.y) < 0.7) continue;
     st.pts.push(p);
@@ -382,8 +444,10 @@ function toast(msg) {
 /* ---------------- 툴바에서 오는 메시지 ---------------- */
 window.pipen.onFromToolbar((m) => {
   if (m.state) {
+    const wasAuto = S.color === 'auto';
     Object.assign(S, m.state);
     applyMode();
+    if (S.color === 'auto' && !wasAuto) refreshBackdrop();
   }
   switch (m.cmd) {
     case 'undo': undo(); break;

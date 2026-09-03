@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('pipen', {
   setOverlayInteractive: (on) => ipcRenderer.send('overlay-interactive', on),
   setOverlayFocusable: (on) => ipcRenderer.send('overlay-focusable', on),
   raiseToolbar: () => ipcRenderer.send('raise-toolbar'),
+  captureScreen: () => ipcRenderer.invoke('capture-screen'),
 
   // 툴바 창 위치/크기 (보이는 UI 영역에 딱 맞춘다)
   setToolbarBounds: (b) => ipcRenderer.send('toolbar-bounds', b),
