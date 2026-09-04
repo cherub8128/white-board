@@ -277,14 +277,25 @@ function applyMode() {
  * 아무 물체나 "펜"으로 인식하므로 스타일러스(pointerType 'pen')도 구분되지 않는다.
  * 즉 크기로도, 입력 종류로도 손바닥을 알아낼 방법이 없어 팜 지우개가 동작하지 않았다.
  *
- * 남는 단서는 "동시에 닿은 접점의 개수"다. 손바닥이나 여러 손가락으로 문지르면
- * 접점이 거의 같은 순간에 둘 이상 생긴다. 반면 글씨를 쓸 때는 접점이 하나다.
- * 그래서 접점 둘이 PALM_WINDOW 안에 함께 닿으면 그 동작 전체를 지우개로 바꾼다.
- * 이때 방금 그려진 짧은 잉크는 아직 확정 전(live 레이어)이라 그냥 버리면 된다.
+ * 남는 단서는 "동시에, 서로 붙어서 닿은 접점"이다. 손바닥이나 여러 손가락으로
+ * 문지르면 접점이 거의 같은 순간에 둘 이상 생기고, 그 접점들은 손 하나 크기 안에
+ * 모여 있다. 반면 글씨를 쓸 때는 접점이 하나다.
  *
- * 이미 한참 글씨를 쓰던 중에 뒤늦게 닿은 접점은 바꾸지 않는다. 그래야 쓰던 글씨가
+ * 여기서 여러 사람이 동시에 필기하는 경우와 구분해야 한다. 두 사람이 각자 쓰면
+ * 접점이 둘 생기는 것은 같지만, 칠판의 서로 다른 자리에 멀찍이 떨어져 있다.
+ * 그래서 시간(PALM_WINDOW)과 거리(palmSpan)를 둘 다 만족할 때만 지우개로 바꾼다.
+ * 멀리 떨어져 닿은 접점은 각자 따로 그리는 획으로 그대로 둔다.
+ *
+ * 바꿀 때 방금 그려진 짧은 잉크는 아직 확정 전(live 레이어)이라 그냥 버리면 된다.
+ * 이미 한참 글씨를 쓰던 중에 뒤늦게 닿은 접점도 바꾸지 않는다. 그래야 쓰던 글씨가
  * 통째로 지워지는 일이 없다. */
 const PALM_WINDOW = 300;     // ms — 이 안에 함께 닿아야 한 동작으로 본다
+
+/* 한 손으로 덮을 수 있는 범위. 손바닥은 대략 화면 가로의 10% 안쪽에 접점이 모인다.
+ * 작은 화면에서 너무 좁아지지 않도록 최소값을 둔다. */
+function palmSpan() {
+  return Math.max(160, window.innerWidth * 0.12);
+}
 let sizeReported = false;    // 접촉 크기를 실제로 보고하는 기기인가
 let palmHintShown = false;
 
@@ -313,23 +324,36 @@ function convertToEraser(a, e) {
   a.drawn = 0;
 }
 
-// 동시 접촉으로 알아보는 팜 (어떤 기기에서도 성립) — 새 접점을 등록하기 전에 부른다
+// 이 획이 새 접점 근처에서 시작했는가 (같은 손으로 볼 수 있는 거리인가)
+function nearNewContact(st, e) {
+  const span = palmSpan();
+  for (const p of st.pts) if (Math.hypot(p.x - e.clientX, p.y - e.clientY) <= span) return true;
+  return false;
+}
+
+/* 동시 접촉으로 알아보는 팜 (어떤 기기에서도 성립) — 새 접점을 등록하기 전에 부른다.
+ * 시간과 거리를 둘 다 만족하는 접점만 한 손의 동작으로 보고 지우개로 바꾼다. */
 function isPalmByMultiTouch(e) {
   if (!S.palmErase) return false;
 
-  let companion = false;
+  const now = Date.now();
+  const together = [];
   for (const a of active.values()) {
-    if (a.kind === 'eraseArea') return true;              // 이미 지우는 중이면 같이 지운다
-    if (a.kind === 'eraseStroke') continue;               // 획 지우개는 그대로 둔다
-    if (a.stroke && Date.now() - a.startedAt <= PALM_WINDOW) companion = true;
+    // 이미 지우는 중인 손 근처면 같이 지운다 (손바닥은 접점이 여러 개 생긴다)
+    if (a.kind === 'eraseArea') {
+      if (a.stroke && nearNewContact(a.stroke, e)) return true;
+      continue;
+    }
+    if (a.kind === 'eraseStroke' || !a.stroke) continue;   // 획 지우개는 그대로 둔다
+    if (now - a.startedAt > PALM_WINDOW) continue;         // 한참 전부터 쓰던 획은 건드리지 않는다
+    if (!nearNewContact(a.stroke, e)) continue;            // 멀리 떨어진 획 = 다른 사람의 동시 필기
+    together.push(a);
   }
-  if (!companion) return false;
+  if (!together.length) return false;
 
-  for (const a of active.values())
-    if (a.stroke && a.stroke.comp !== 'destination-out') convertToEraser(a, e);
+  for (const a of together) convertToEraser(a, e);
   redrawLive();                                           // 방금까지 그려둔 잉크를 버린다
-  for (const a of active.values()) {
-    if (!a.stroke || a.stroke.comp !== 'destination-out') continue;
+  for (const a of together) {
     drawSegments(bctx, a.stroke, 1);
     a.drawn = a.stroke.pts.length;
   }
