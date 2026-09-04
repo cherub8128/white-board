@@ -37,8 +37,10 @@ const S = {
   screenLock: true,
   touchWrite: true,
   palmErase: true,
-  palmThreshold: 90,
+  palmThreshold: 45,
   lastTouchSize: 0,
+  touchSizeReported: false,
+  sawPen: false,
   fanOpen: true,
   pickerOpen: false,
   submenu: 'color'
@@ -197,6 +199,13 @@ function layout() {
   const maxX = Math.max(...rects.map(r => r.x + r.w)) + MARGIN;
   const maxY = Math.max(...rects.map(r => r.y + r.h)) + MARGIN;
 
+  if (dragMode) {
+    // 드래그 중에는 창이 화면 전체 크기다. 창은 그대로 두고 dock 만 옮긴다.
+    dock.style.left = (dockScreen.x - window.screenX) + 'px';
+    dock.style.top = (dockScreen.y - window.screenY) + 'px';
+    return dir;
+  }
+
   dock.style.left = (-minX) + 'px';
   dock.style.top = (-minY) + 'px';
 
@@ -305,7 +314,12 @@ function updateSlider() {
   sizeValue.textContent = S[key];
 
   if (key === 'palmThreshold') {
-    sizeLabel.textContent = '팜 인식 크기 (측정: ' + (S.lastTouchSize || '-') + ')';
+    // 접촉 크기를 보고하지 않는 기기에서는 크기 기준이 성립하지 않는다.
+    // 그런 기기는 "펜은 쓰고 손은 지운다" 로 대신 동작하므로 그 사실을 알려준다.
+    sizeLabel.textContent = S.touchSizeReported
+      ? '팜 인식 크기 (측정: ' + (S.lastTouchSize || '-') + ')'
+      : (S.sawPen ? '이 화면은 접촉 크기를 못 읽습니다 — 펜은 필기, 손은 지우기'
+                  : '팜 인식 크기 (이 화면은 접촉 크기를 보고하지 않습니다)');
     const d = Math.min(30, Math.max(4, S[key] / 6));
     sizeDot.style.cssText = 'width:' + d + 'px;height:' + d + 'px;background:#9aa1ad';
   } else {
@@ -418,8 +432,21 @@ hueRange.addEventListener('input', () => { hsv.h = Number(hueRange.value); apply
 hueRange.addEventListener('change', render);
 colorPanel.addEventListener('pointerdown', (e) => e.stopPropagation());
 
-/* ---------------- 핸들: 드래그 이동 + 탭으로 열기 ---------------- */
+/* ---------------- 핸들: 드래그 이동 + 탭으로 열기 ----------------
+ * 드래그가 시작되면 툴바 창을 화면 전체로 한 번 키우고(메인 프로세스), 그 뒤로는
+ * 창을 전혀 옮기지 않는다. 예전에는 포인터가 움직일 때마다 창을 옮겼는데, 창 이동이
+ * 입력보다 늦게 반영되면서 위치가 앞뒤로 튀어 툴바가 부르르 떨렸다.
+ * 터치는 이벤트가 훨씬 촘촘해서 전자칠판에서 특히 심했다. */
 let drag = null;
+let dragMode = false;
+let dragFrame = 0;
+
+function setDragMode(on) {
+  if (dragMode === on) return;
+  dragMode = on;
+  window.pipen.setToolbarDragging(on);
+}
+
 handle.addEventListener('pointerdown', (e) => {
   try { handle.setPointerCapture(e.pointerId); } catch (_) { /* 무시 */ }
   drag = { sx: e.screenX, sy: e.screenY, ox: dockScreen.x, oy: dockScreen.y, moved: false };
@@ -428,12 +455,16 @@ handle.addEventListener('pointerdown', (e) => {
 handle.addEventListener('pointermove', (e) => {
   if (!drag) return;
   const dx = e.screenX - drag.sx, dy = e.screenY - drag.sy;
-  if (Math.abs(dx) > 4 || Math.abs(dy) > 4) drag.moved = true;
-  if (!drag.moved) return;
+  if (!drag.moved) {
+    if (Math.abs(dx) <= 4 && Math.abs(dy) <= 4) return;   // 탭과 구분하기 위한 최소 이동량
+    drag.moved = true;
+    setDragMode(true);
+  }
   dockScreen.x = drag.ox + dx;
   dockScreen.y = drag.oy + dy;
   clampDock();
-  layout();
+  if (dragFrame) return;                                   // 한 프레임에 한 번만 배치
+  dragFrame = requestAnimationFrame(() => { dragFrame = 0; layout(); });
 });
 /* 토글은 click 한 곳에서만 처리한다.
  * 이 창은 비활성 창(focusable:false)이라 탭/클릭 한 번이 포인터 이벤트 두 쌍으로
@@ -444,12 +475,21 @@ let suppressClick = false;
 function handleUp() {
   const d = drag;
   drag = null;                       // 어떤 경로로 끝나든 드래그 상태를 먼저 정리
-  if (d && d.moved) { suppressClick = true; render(); }
+  if (dragFrame) { cancelAnimationFrame(dragFrame); dragFrame = 0; }
+  setDragMode(false);                // 창을 다시 UI 크기에 딱 맞춘다
+  if (d && d.moved) { suppressClick = true; }
+  render();
 }
 handle.addEventListener('pointerup', handleUp);
 handle.addEventListener('pointercancel', handleUp);
 // 창 크기가 바뀌면서 포인터 캡처가 풀릴 수 있다. 이때는 토글하지 않고 상태만 정리한다.
-handle.addEventListener('lostpointercapture', () => { drag = null; });
+handle.addEventListener('lostpointercapture', () => {
+  if (!drag) return;
+  drag = null;
+  if (dragFrame) { cancelAnimationFrame(dragFrame); dragFrame = 0; }
+  setDragMode(false);
+  render();
+});
 
 handle.addEventListener('click', (e) => {
   e.stopPropagation();
@@ -463,7 +503,7 @@ handle.addEventListener('click', (e) => {
 
 /* 어떤 이유로든 창 크기와 모델이 어긋나면 되돌린다 (접었다 폈다를 반복할 때 보험) */
 setInterval(() => {
-  if (drag) return;
+  if (drag || dragMode) return;
   layout();
 }, 1500);
 
@@ -500,6 +540,8 @@ window.pipen.onShortcut((name) => {
 window.pipen.onFromOverlay((m) => {
   if (m.touchSize !== undefined) {
     S.lastTouchSize = m.touchSize;
+    if (m.sizeReported !== undefined) S.touchSizeReported = m.sizeReported;
+    if (m.sawPen !== undefined) S.sawPen = m.sawPen;
     if (S.submenu === 'settings') updateSlider();
   }
 });

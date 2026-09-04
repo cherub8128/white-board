@@ -1,6 +1,6 @@
 {
   "name": "pi-pen",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Pi Pen — 전자칠판/OPS 윈도우용 투명 오버레이 판서 앱",
   "main": "main.js",
   "scripts": {

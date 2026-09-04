@@ -1,10 +1,19 @@
 /* ============================================================
  *  Pi Pen — 오버레이 창 (그리기 전담)
  *  도구 상태는 툴바 창에서 IPC 로 받아 적용한다.
+ *
+ *  레이어를 둘로 나눈 이유:
+ *  예전에는 캔버스 하나에 "확정된 그림 전체 + 그리는 중인 획"을 매 프레임 다시
+ *  합성했다. 전체화면 크기의 이미지를 초당 60번 복사하는 셈이라, 전자칠판처럼
+ *  해상도가 크고 GPU 가 약한 기기에서는 펜이 밀리고, 그 부하 때문에 아래 화면의
+ *  애니메이션까지 끊겼다. 지금은 확정된 그림(base)은 획이 끝날 때만 그리고,
+ *  그리는 중인 획(live)만 매 프레임 "새로 늘어난 부분"을 이어 그린다.
  * ========================================================== */
 
-const canvas = document.getElementById('board');
-const ctx = canvas.getContext('2d', { desynchronized: true });
+const base = document.getElementById('board');   // 확정된 획 (거의 안 건드린다)
+const live = document.getElementById('live');    // 그리는 중인 획 + 입력 수신
+const bctx = base.getContext('2d');
+const lctx = live.getContext('2d', { desynchronized: true });
 
 /* ---------------- 도구 상태 (툴바가 보내준다) ---------------- */
 const S = {
@@ -17,7 +26,7 @@ const S = {
   screenLock: true,
   touchWrite: true,
   palmErase: true,
-  palmThreshold: 90,
+  palmThreshold: 45,
   modalOpen: false
 };
 
@@ -27,83 +36,95 @@ let redoStack = [];
 let strokeSeq = 0;
 const active = new Map();
 
-/* ---------------- 캔버스 ----------------
- * 확정된 획은 오프스크린 레이어(base)에 한 번만 그리고,
- * 화면은 base + 진행 중인 획으로 합성한다. 반투명한 형광펜을 세그먼트마다
- * 겹쳐 그리면 이음새가 진해지므로, 획 하나는 항상 path 하나로 그린다. */
-const base = document.createElement('canvas');
-const bctx = base.getContext('2d');
-
+/* ---------------- 캔버스 크기 ---------------- */
 let dpr = 1;
 function resizeCanvas() {
   dpr = window.devicePixelRatio || 1;
-  for (const cv of [canvas, base]) {
+  for (const cv of [base, live]) {
     cv.width = Math.round(window.innerWidth * dpr);
     cv.height = Math.round(window.innerHeight * dpr);
+    cv.style.width = window.innerWidth + 'px';
+    cv.style.height = window.innerHeight + 'px';
   }
-  canvas.style.width = window.innerWidth + 'px';
-  canvas.style.height = window.innerHeight + 'px';
-  for (const c of [ctx, bctx]) {
+  for (const c of [bctx, lctx]) {
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     c.lineCap = 'round';
     c.lineJoin = 'round';
   }
   rebuildBase();
+  redrawLive();
 }
 window.addEventListener('resize', resizeCanvas);
 
+/* ---------------- 획 그리기 ---------------- */
 function widthAt(st, p) {
   if (st.tool === 'pen') return Math.max(0.6, st.size * (0.45 + 1.1 * (p.p === undefined ? 0.5 : p.p)));
   return st.size;
 }
 
-function renderStroke(c, st) {
-  const pts = st.pts;
-  if (pts.length === 0) return;
-
-  c.save();
+function beginStyle(c, st) {
   c.globalCompositeOperation = st.comp;
   c.globalAlpha = st.alpha;
   c.strokeStyle = st.color;
+  c.fillStyle = st.color;
   c.lineCap = 'round';
   c.lineJoin = 'round';
+}
 
-  if (pts.length === 1) {
-    c.beginPath();
-    c.fillStyle = (st.auto && pts[0].c) ? pts[0].c : st.color;
-    c.arc(pts[0].x, pts[0].y, widthAt(st, pts[0]) / 2, 0, Math.PI * 2);
-    c.fill();
-    c.restore();
-    return;
-  }
+// 점 하나짜리 획 (톡 찍은 경우)
+function drawDot(c, st) {
+  const p = st.pts[0];
+  c.beginPath();
+  c.fillStyle = (st.auto && p.c) ? p.c : st.color;
+  c.arc(p.x, p.y, widthAt(st, p) / 2, 0, Math.PI * 2);
+  c.fill();
+}
 
-  if (st.tool === 'pen') {
-    // 필압에 따라 두께가 달라지므로 세그먼트 단위 (불투명이라 겹쳐도 티가 안 남)
-    for (let i = 1; i < pts.length; i++) {
-      const a = pts[i - 1], b = pts[i], prev = pts[i - 2] || a;
-      if (st.auto && b.c) c.strokeStyle = b.c;   // 배경이 바뀌면 획 색도 따라 바뀐다
-      c.beginPath();
-      c.lineWidth = (widthAt(st, a) + widthAt(st, b)) / 2;
-      c.moveTo((prev.x + a.x) / 2, (prev.y + a.y) / 2);
-      c.quadraticCurveTo(a.x, a.y, (a.x + b.x) / 2, (a.y + b.y) / 2);
-      if (i === pts.length - 1) c.lineTo(b.x, b.y);
-      c.stroke();
-    }
-  } else {
-    c.lineWidth = st.size;
+/* 세그먼트 단위로 이어 그리기 — from 번째 점부터.
+ * 불투명한 펜/지우개는 겹쳐 그려도 티가 안 나므로 새로 들어온 구간만 이어 붙일 수 있다. */
+function drawSegments(c, st, from) {
+  const pts = st.pts;
+  c.save();
+  beginStyle(c, st);
+  if (pts.length === 1) { if (from <= 1) drawDot(c, st); c.restore(); return; }
+  for (let i = Math.max(1, from); i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], prev = pts[i - 2] || a;
+    if (st.auto && b.c) c.strokeStyle = b.c;      // 배경이 바뀌면 획 색도 따라 바뀐다
     c.beginPath();
-    c.moveTo(pts[0].x, pts[0].y);
-    for (let i = 1; i < pts.length - 1; i++) {
-      c.quadraticCurveTo(pts[i].x, pts[i].y,
-        (pts[i].x + pts[i + 1].x) / 2, (pts[i].y + pts[i + 1].y) / 2);
-    }
-    c.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
-    c.stroke();   // 획 전체를 한 번의 stroke 로 — 이음새 겹침 없음
+    c.lineWidth = (st.tool === 'pen') ? (widthAt(st, a) + widthAt(st, b)) / 2 : st.size;
+    c.moveTo((prev.x + a.x) / 2, (prev.y + a.y) / 2);
+    c.quadraticCurveTo(a.x, a.y, (a.x + b.x) / 2, (a.y + b.y) / 2);
+    if (i === pts.length - 1) c.lineTo(b.x, b.y);
+    c.stroke();
   }
   c.restore();
 }
 
-function clearCanvas(c, cv) {
+/* 형광펜은 반투명이라 세그먼트를 겹쳐 그리면 이음새가 진해진다. 항상 path 하나로 그린다. */
+function drawWholePath(c, st) {
+  const pts = st.pts;
+  if (!pts.length) return;
+  c.save();
+  beginStyle(c, st);
+  if (pts.length === 1) { drawDot(c, st); c.restore(); return; }
+  c.lineWidth = st.size;
+  c.beginPath();
+  c.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length - 1; i++) {
+    c.quadraticCurveTo(pts[i].x, pts[i].y,
+      (pts[i].x + pts[i + 1].x) / 2, (pts[i].y + pts[i + 1].y) / 2);
+  }
+  c.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+  c.stroke();
+  c.restore();
+}
+
+function renderStroke(c, st) {
+  if (st.tool === 'highlighter') drawWholePath(c, st);
+  else drawSegments(c, st, 1);
+}
+
+function clearAllOf(c, cv) {
   c.save();
   c.setTransform(1, 0, 0, 1, 0, 0);
   c.clearRect(0, 0, cv.width, cv.height);
@@ -111,35 +132,82 @@ function clearCanvas(c, cv) {
 }
 
 function rebuildBase() {
-  clearCanvas(bctx, base);
+  clearAllOf(bctx, base);
   for (const st of strokes) if (!st.gone) renderStroke(bctx, st);
-  requestPaint();
 }
 
-/* 화면 합성 — 프레임당 한 번.
- * 창이 가려지는 등의 이유로 rAF 가 멈추면 그림이 안 나오므로 타이머로 한 번 더 보호한다. */
+/* ---------------- live 레이어 ----------------
+ * 매 프레임 화면 전체를 지우지 않고, 실제로 그린 영역(dirty)만 지운다. */
+let dirty = null;
+function markDirty(x, y, r) {
+  const a = { x0: x - r, y0: y - r, x1: x + r, y1: y + r };
+  if (!dirty) dirty = a;
+  else {
+    dirty.x0 = Math.min(dirty.x0, a.x0); dirty.y0 = Math.min(dirty.y0, a.y0);
+    dirty.x1 = Math.max(dirty.x1, a.x1); dirty.y1 = Math.max(dirty.y1, a.y1);
+  }
+}
+function markStrokeDirty(st) {
+  const r = st.size + 4;
+  for (const p of st.pts) markDirty(p.x, p.y, r);
+}
+function clearLive() {
+  if (!dirty) return;
+  lctx.clearRect(dirty.x0, dirty.y0, dirty.x1 - dirty.x0, dirty.y1 - dirty.y0);
+  dirty = null;
+}
+
+// 진행 중인 획 전부를 처음부터 다시 (레이어를 통째로 비워야 할 때만)
+function redrawLive() {
+  clearAllOf(lctx, live);
+  dirty = null;
+  // 영역 지우개는 base 에 직접 반영되므로 다시 그릴 필요가 없다
+  for (const a of active.values()) if (a.stroke && a.stroke.comp !== 'destination-out') a.drawn = 0;
+  if (active.size) requestPaint();
+}
+
 let paintQueued = false;
 let paintFallback = null;
+
 function paintNow() {
   paintQueued = false;
   if (paintFallback) { clearTimeout(paintFallback); paintFallback = null; }
-  clearCanvas(ctx, canvas);
-  ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.drawImage(base, 0, 0);
-  ctx.restore();
-  for (const a of active.values()) if (a.stroke) renderStroke(ctx, a.stroke);
+
+  // 형광펜이 진행 중이면 그 획은 통째로 다시 그려야 하므로 live 를 한 번 비운다
+  let needFull = false;
+  for (const a of active.values())
+    if (a.stroke && a.stroke.tool === 'highlighter') needFull = true;
+  if (needFull) {
+    clearLive();
+    for (const a of active.values()) if (a.stroke && a.stroke.comp !== 'destination-out') a.drawn = 0;
+  }
+
+  for (const a of active.values()) {
+    const st = a.stroke;
+    if (!st || st.comp === 'destination-out') continue;   // 영역 지우개는 base 에 직접 반영
+    if (st.tool === 'highlighter') {
+      drawWholePath(lctx, st);
+      markStrokeDirty(st);
+      a.drawn = st.pts.length;
+    } else if (a.drawn < st.pts.length) {
+      drawSegments(lctx, st, Math.max(1, a.drawn));
+      for (let i = Math.max(0, a.drawn - 1); i < st.pts.length; i++)
+        markDirty(st.pts[i].x, st.pts[i].y, widthAt(st, st.pts[i]) + 4);
+      a.drawn = st.pts.length;
+    }
+  }
 }
+
 function requestPaint() {
   if (paintQueued) return;
   paintQueued = true;
   requestAnimationFrame(() => { if (paintQueued) paintNow(); });
-  paintFallback = setTimeout(() => { if (paintQueued) paintNow(); }, 120);
+  // rAF 가 멈추는 환경(창이 완전히 가려지는 등)을 대비한 보험
+  paintFallback = setTimeout(() => { if (paintQueued) paintNow(); }, 250);
 }
 
 /* ---------------- 자동 대비 색 ----------------
- * 아래 화면을 작게 찍어 두고, 획이 지나는 지점의 색을 읽어 반전색을 고른다.
- * 반전색이 배경과 밝기가 비슷해 잘 안 보이는 경우(회색 계열)에는 검정/흰색으로 밀어낸다. */
+ * 아래 화면을 작게 찍어 두고, 획이 지나는 지점의 색을 읽어 반전색을 고른다. */
 const bgCanvas = document.createElement('canvas');
 const bgCtx = bgCanvas.getContext('2d', { willReadFrequently: true });
 let bgData = null;
@@ -171,7 +239,6 @@ function contrastColorAt(x, y) {
   const sx = Math.min(bgData.width - 1, Math.max(0, Math.round(x / window.innerWidth * bgData.width)));
   const sy = Math.min(bgData.height - 1, Math.max(0, Math.round(y / window.innerHeight * bgData.height)));
 
-  // 주변 3x3 평균 — 글자 위 같은 잔무늬에서 색이 튀는 것을 막는다
   let r = 0, g = 0, b = 0, n = 0;
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
@@ -189,33 +256,49 @@ function contrastColorAt(x, y) {
   return '#' + [ir, ig, ib].map(v => v.toString(16).padStart(2, '0')).join('');
 }
 
-/* 자동 대비를 쓰는 동안에는 화면이 바뀌어도 따라가도록 주기적으로 다시 찍는다 */
+/* 자동 대비를 쓰는 동안에만, 그리고 있지 않을 때만 다시 찍는다.
+ * 화면 캡처는 무거워서 필기 중에 돌면 아래 화면 애니메이션까지 끊긴다. */
 setInterval(() => {
-  if (S.color === 'auto' && active.size === 0) refreshBackdrop();
-}, 1500);
+  if (S.color === 'auto' && S.tool !== 'mouse' && active.size === 0) refreshBackdrop();
+}, 2500);
 
 /* ---------------- 입력 ---------------- */
 function captureInput() { return S.tool !== 'mouse' && S.screenLock; }
 
 function applyMode() {
   const on = captureInput() || S.modalOpen;
-  canvas.style.pointerEvents = captureInput() ? 'auto' : 'none';
+  live.style.pointerEvents = captureInput() ? 'auto' : 'none';
   window.pipen.setOverlayInteractive(on);
+}
+
+/* 팜(손바닥) 판정.
+ * 접촉 크기(e.width/height)로 판단하는 게 원칙이지만, 전자칠판 중에는 접촉 크기를
+ * 아예 보고하지 않고 항상 1 로 주는 기기가 많다. 그런 기기에서는 크기 기준이 절대
+ * 성립하지 않아 팜 지우개가 "안 되는" 것처럼 보였다. 그래서 스타일러스
+ * (pointerType 'pen')를 한 번이라도 본 기기에서는 "펜은 쓰고, 손은 지운다"는
+ * 익숙한 방식으로 대신 동작하게 한다. */
+let sawPen = false;          // 스타일러스 입력을 본 적이 있는가
+let sizeReported = false;    // 접촉 크기를 실제로 보고하는 기기인가
+
+function reportTouch(c) {
+  window.pipen.toToolbar({ touchSize: Math.round(c), sizeReported, sawPen });
 }
 
 function isPalm(e) {
   if (e.pointerType !== 'touch') return false;
   const c = Math.max(e.width || 0, e.height || 0);
-  if (c > 0) window.pipen.toToolbar({ touchSize: Math.round(c) });
+  if (c > 1) sizeReported = true;
+  if (c > 0) reportTouch(c);
   if (!S.palmErase) return false;
-  return c >= S.palmThreshold;
+  if (sizeReported) return c >= S.palmThreshold;
+  return sawPen;             // 크기를 못 읽는 기기: 펜이 있는 화면이면 손가락 = 지우개
 }
 
 function makeStroke(kind, e) {
   const id = ++strokeSeq;
   if (kind === 'eraseArea') {
     const c = Math.max(e.width || 0, e.height || 0);
-    const size = (e.pointerType === 'touch' && c > 0)
+    const size = (e.pointerType === 'touch' && c > 1)
       ? Math.max(S.eraserSize, c * 1.6) : S.eraserSize;
     return { id, tool: 'eraser', color: '#000', size, alpha: 1, comp: 'destination-out', pts: [], gone: false };
   }
@@ -232,12 +315,13 @@ function pointOf(e, auto) {
   return p;
 }
 
-canvas.addEventListener('pointerdown', (e) => {
+live.addEventListener('pointerdown', (e) => {
   if (!captureInput()) return;
+  if (e.pointerType === 'pen') sawPen = true;
   const palm = isPalm(e);
   if (e.pointerType === 'touch' && !S.touchWrite && !palm) return;
 
-  try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* 캡처 실패는 무시 */ }
+  try { live.setPointerCapture(e.pointerId); } catch (_) { /* 캡처 실패는 무시 */ }
   e.preventDefault();
 
   let kind;
@@ -247,18 +331,22 @@ canvas.addEventListener('pointerdown', (e) => {
 
   if (kind === 'eraseStroke') {
     const removed = [];
-    active.set(e.pointerId, { kind, removed, stroke: null, t: Date.now() });
+    active.set(e.pointerId, { kind, removed, stroke: null, t: Date.now(), drawn: 0 });
     eraseStrokeAt(pointOf(e), removed);
+    notifyDrawing();
     return;
   }
 
   const stroke = makeStroke(kind, e);
   stroke.pts.push(pointOf(e, stroke.auto));
-  active.set(e.pointerId, { kind, stroke, t: Date.now() });
-  requestPaint();
+  const a = { kind, stroke, t: Date.now(), drawn: 0 };
+  active.set(e.pointerId, a);
+  if (stroke.comp === 'destination-out') { drawSegments(bctx, stroke, 1); a.drawn = 1; }
+  else requestPaint();
+  notifyDrawing();
 }, { passive: false });
 
-canvas.addEventListener('pointermove', (e) => {
+live.addEventListener('pointermove', (e) => {
   const a = active.get(e.pointerId);
   if (!a) return;
   e.preventDefault();
@@ -278,32 +366,54 @@ canvas.addEventListener('pointermove', (e) => {
     if (Math.hypot(p.x - last.x, p.y - last.y) < 0.7) continue;
     st.pts.push(p);
   }
+
+  if (st.comp === 'destination-out') {
+    // 영역 지우개는 base 를 직접 깎는다 (live 에 그리면 아래 그림이 안 지워진다)
+    if (a.drawn < st.pts.length) { drawSegments(bctx, st, Math.max(1, a.drawn)); a.drawn = st.pts.length; }
+    return;
+  }
   requestPaint();
 }, { passive: false });
 
 function endPointer(e) { finishStroke(e.pointerId); }
-canvas.addEventListener('pointerup', endPointer);
-canvas.addEventListener('pointercancel', endPointer);
-canvas.addEventListener('lostpointercapture', endPointer);
+live.addEventListener('pointerup', endPointer);
+live.addEventListener('pointercancel', endPointer);
+live.addEventListener('lostpointercapture', endPointer);
 window.addEventListener('blur', () => { for (const id of [...active.keys()]) finishStroke(id); });
 
 function finishStroke(pointerId) {
   const a = active.get(pointerId);
   if (!a) return;
   active.delete(pointerId);
-  window.pipen.raiseToolbar();      // 그리는 동안 z-order 가 흔들려도 툴바가 계속 눌리도록
 
   if (a.kind === 'eraseStroke') {
     if (a.removed.length) { history.push({ kind: 'erase', ids: a.removed.slice() }); redoStack = []; }
+    notifyDrawing();
     return;
   }
   const st = a.stroke;
-  if (!st || st.pts.length === 0) { requestPaint(); return; }
+  if (!st || st.pts.length === 0) { redrawLive(); notifyDrawing(); return; }
   strokes.push(st);
   history.push({ kind: 'draw', id: st.id });
   redoStack = [];
-  renderStroke(bctx, st);
-  requestPaint();
+  if (st.comp === 'destination-out') {
+    if (a.drawn < st.pts.length) drawSegments(bctx, st, Math.max(1, a.drawn));
+  } else {
+    renderStroke(bctx, st);      // 확정 그림으로 옮기고
+    redrawLive();                // live 를 비운다
+  }
+  notifyDrawing();
+}
+
+/* 그리는 중에는 메인 프로세스가 툴바를 다시 띄우는(z-order 보정) 작업을 쉬게 한다.
+ * 그 작업이 필기 중에 돌면 아래 화면의 합성이 흔들려 애니메이션이 끊긴다. */
+let drawingFlag = false;
+function notifyDrawing() {
+  const on = active.size > 0;
+  if (on === drawingFlag) return;
+  drawingFlag = on;
+  window.pipen.setDrawing(on);
+  if (!on) window.pipen.raiseToolbar();   // 획이 끝나면 툴바를 다시 위로
 }
 
 /* pointerup 을 놓쳐 획이 남아 있으면(포커스 전환 등) 정리한다 */
@@ -363,7 +473,7 @@ function clearAll() {
   if (!ids.length) { toast('지울 내용이 없습니다'); return; }
   for (const id of ids) findStroke(id).gone = true;
   history.push({ kind: 'clear', ids }); redoStack = [];
-  rebuildBase(); toast('전체 지움');
+  rebuildBase(); redrawLive(); toast('전체 지움');
 }
 
 /* ---------------- 모달 (정보 / 업데이트) ---------------- */

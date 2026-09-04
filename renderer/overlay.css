@@ -2,7 +2,10 @@
 html,body { width:100%; height:100%; overflow:hidden; background:transparent;
   font-family:"Pretendard","Malgun Gothic",-apple-system,Segoe UI,sans-serif; }
 
-#board { position:fixed; inset:0; width:100%; height:100%; touch-action:none; }
+/* board = 확정된 그림, live = 그리는 중인 획(입력도 여기서 받는다) */
+#board, #live { position:fixed; inset:0; width:100%; height:100%; touch-action:none; }
+#board { pointer-events:none; z-index:1; }
+#live  { z-index:2; }
 
 /* ===== 토스트 ===== */
 .toast {

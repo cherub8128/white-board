@@ -81,19 +81,39 @@ function createToolbar() {
 
 /* ---------------- 창 사이 중계 ---------------- */
 
-// 툴바가 계산한 UI 영역에 맞춰 툴바 창을 옮긴다 (보이는 부분만 클릭을 받도록 최소 크기로)
+/* 툴바가 계산한 UI 영역에 맞춰 툴바 창을 옮긴다 (보이는 부분만 클릭을 받도록 최소 크기로).
+ *
+ * 드래그 중에는 창을 아예 건드리지 않는다.
+ * 예전에는 손가락이 움직일 때마다 setBounds 로 창을 옮겼는데, 창을 옮기는 일은
+ * 렌더러의 포인터 이벤트보다 느리게 반영된다. 그래서 "창을 옮김 -> 다음 이벤트가
+ * 옛 위치 기준으로 들어옴 -> 다시 옮김" 이 반복되며 툴바가 부르르 떨렸다.
+ * 터치는 마우스보다 이벤트가 훨씬 촘촘해서 전자칠판에서 특히 심했다.
+ * 이제는 드래그가 시작되면 툴바 창을 화면 전체 크기로 한 번만 키우고, 그 안에서
+ * CSS 로만 움직인다. 손을 떼면 다시 UI 크기에 딱 맞춘다. */
 let lastBounds = null;
-ipcMain.on('toolbar-bounds', (_e, b) => {
-  if (!toolWin) return;
-  const nb = {
-    x: Math.round(b.x), y: Math.round(b.y),
-    width: Math.max(1, Math.round(b.width)), height: Math.max(1, Math.round(b.height))
-  };
+let dragging = false;
+
+function applyToolbarBounds(nb) {
+  if (!toolWin || toolWin.isDestroyed()) return;
   if (lastBounds && nb.x === lastBounds.x && nb.y === lastBounds.y &&
       nb.width === lastBounds.width && nb.height === lastBounds.height) return;   // 같은 값 재설정 방지
   lastBounds = nb;
   toolWin.setBounds(nb);
   toolWin.moveTop();
+}
+
+ipcMain.on('toolbar-bounds', (_e, b) => {
+  if (!toolWin || dragging) return;
+  applyToolbarBounds({
+    x: Math.round(b.x), y: Math.round(b.y),
+    width: Math.max(1, Math.round(b.width)), height: Math.max(1, Math.round(b.height))
+  });
+});
+
+ipcMain.on('toolbar-dragging', (_e, on) => {
+  if (!toolWin || toolWin.isDestroyed()) return;
+  dragging = !!on;
+  if (dragging) applyToolbarBounds(primaryBounds());   // 드래그 동안만 전체 화면
 });
 
 // 오버레이가 입력을 받을지 (펜 모드 = 받음, 마우스/통과 모드 = 통과)
@@ -104,13 +124,17 @@ ipcMain.on('overlay-interactive', (_e, interactive) => {
 });
 
 /* 툴바는 어떤 경우에도 오버레이 위에 있어야 클릭을 받는다.
- * 다른 앱이 z-order 를 흔드는 경우가 있어 획이 끝날 때마다, 그리고 주기적으로 다시 올린다. */
+ * 다른 앱이 z-order 를 흔드는 경우가 있어 획이 끝날 때마다, 그리고 주기적으로 다시 올린다.
+ * 다만 필기 중에는 쉰다 — 창을 다시 띄우는 일은 화면 합성을 건드려서,
+ * 그리는 동안 반복되면 아래 화면의 애니메이션이 끊긴다. */
+let drawing = false;
 function raiseToolbar() {
-  if (!toolWin || toolWin.isDestroyed()) return;
+  if (!toolWin || toolWin.isDestroyed() || drawing) return;
   toolWin.setAlwaysOnTop(true, 'screen-saver');
   toolWin.moveTop();
 }
 ipcMain.on('raise-toolbar', raiseToolbar);
+ipcMain.on('overlay-drawing', (_e, on) => { drawing = !!on; });
 
 // 모달을 띄울 때만 오버레이가 키보드를 받도록 (Esc 로 닫기)
 ipcMain.on('overlay-focusable', (_e, on) => {
@@ -227,7 +251,7 @@ function setupBackgroundTasks() {
   screen.on('display-removed', resize);
 
   setTimeout(() => checkUpdate(false), 8000);
-  setInterval(raiseToolbar, 2000);     // z-order 보험
+  setInterval(raiseToolbar, 5000);     // z-order 보험 (필기 중에는 건너뛴다)
 }
 
 app.whenReady().then(() => {
