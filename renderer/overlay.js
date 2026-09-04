@@ -271,27 +271,70 @@ function applyMode() {
   window.pipen.setOverlayInteractive(on);
 }
 
-/* 팜(손바닥) 판정.
- * 접촉 크기(e.width/height)로 판단하는 게 원칙이지만, 전자칠판 중에는 접촉 크기를
- * 아예 보고하지 않고 항상 1 로 주는 기기가 많다. 그런 기기에서는 크기 기준이 절대
- * 성립하지 않아 팜 지우개가 "안 되는" 것처럼 보였다. 그래서 스타일러스
- * (pointerType 'pen')를 한 번이라도 본 기기에서는 "펜은 쓰고, 손은 지운다"는
- * 익숙한 방식으로 대신 동작하게 한다. */
-let sawPen = false;          // 스타일러스 입력을 본 적이 있는가
+/* ---------------- 팜(손바닥) 지우개 ----------------
+ * 접촉 크기(e.width/height)로 판단하는 게 원칙이지만, 적외선/광학 방식 전자칠판은
+ * 접촉 크기를 아예 보고하지 않고 항상 1 로 주는 경우가 많다. 게다가 이런 칠판은
+ * 아무 물체나 "펜"으로 인식하므로 스타일러스(pointerType 'pen')도 구분되지 않는다.
+ * 즉 크기로도, 입력 종류로도 손바닥을 알아낼 방법이 없어 팜 지우개가 동작하지 않았다.
+ *
+ * 남는 단서는 "동시에 닿은 접점의 개수"다. 손바닥이나 여러 손가락으로 문지르면
+ * 접점이 거의 같은 순간에 둘 이상 생긴다. 반면 글씨를 쓸 때는 접점이 하나다.
+ * 그래서 접점 둘이 PALM_WINDOW 안에 함께 닿으면 그 동작 전체를 지우개로 바꾼다.
+ * 이때 방금 그려진 짧은 잉크는 아직 확정 전(live 레이어)이라 그냥 버리면 된다.
+ *
+ * 이미 한참 글씨를 쓰던 중에 뒤늦게 닿은 접점은 바꾸지 않는다. 그래야 쓰던 글씨가
+ * 통째로 지워지는 일이 없다. */
+const PALM_WINDOW = 300;     // ms — 이 안에 함께 닿아야 한 동작으로 본다
 let sizeReported = false;    // 접촉 크기를 실제로 보고하는 기기인가
+let palmHintShown = false;
 
 function reportTouch(c) {
-  window.pipen.toToolbar({ touchSize: Math.round(c), sizeReported, sawPen });
+  window.pipen.toToolbar({ touchSize: Math.round(c), sizeReported });
 }
 
-function isPalm(e) {
+// 접촉 크기로 알아보는 팜 (크기를 보고하는 기기에서만 성립)
+function isPalmBySize(e) {
   if (e.pointerType !== 'touch') return false;
   const c = Math.max(e.width || 0, e.height || 0);
   if (c > 1) sizeReported = true;
   if (c > 0) reportTouch(c);
+  if (!S.palmErase || !sizeReported) return false;
+  return c >= S.palmThreshold;
+}
+
+// 진행 중인 그리기 획을 지우개로 바꾼다 (지금까지 지나온 자취를 그대로 지운다)
+function convertToEraser(a, e) {
+  const pts = a.stroke ? a.stroke.pts : [];
+  const er = makeStroke('eraseArea', e);
+  er.size = Math.max(er.size, S.eraserSize * 1.5);
+  er.pts = pts;
+  a.stroke = er;
+  a.kind = 'eraseArea';
+  a.drawn = 0;
+}
+
+// 동시 접촉으로 알아보는 팜 (어떤 기기에서도 성립) — 새 접점을 등록하기 전에 부른다
+function isPalmByMultiTouch(e) {
   if (!S.palmErase) return false;
-  if (sizeReported) return c >= S.palmThreshold;
-  return sawPen;             // 크기를 못 읽는 기기: 펜이 있는 화면이면 손가락 = 지우개
+
+  let companion = false;
+  for (const a of active.values()) {
+    if (a.kind === 'eraseArea') return true;              // 이미 지우는 중이면 같이 지운다
+    if (a.kind === 'eraseStroke') continue;               // 획 지우개는 그대로 둔다
+    if (a.stroke && Date.now() - a.startedAt <= PALM_WINDOW) companion = true;
+  }
+  if (!companion) return false;
+
+  for (const a of active.values())
+    if (a.stroke && a.stroke.comp !== 'destination-out') convertToEraser(a, e);
+  redrawLive();                                           // 방금까지 그려둔 잉크를 버린다
+  for (const a of active.values()) {
+    if (!a.stroke || a.stroke.comp !== 'destination-out') continue;
+    drawSegments(bctx, a.stroke, 1);
+    a.drawn = a.stroke.pts.length;
+  }
+  if (!palmHintShown) { palmHintShown = true; toast('손바닥·두 손가락으로 문지르면 지워집니다'); }
+  return true;
 }
 
 function makeStroke(kind, e) {
@@ -317,8 +360,7 @@ function pointOf(e, auto) {
 
 live.addEventListener('pointerdown', (e) => {
   if (!captureInput()) return;
-  if (e.pointerType === 'pen') sawPen = true;
-  const palm = isPalm(e);
+  const palm = isPalmBySize(e) || isPalmByMultiTouch(e);
   if (e.pointerType === 'touch' && !S.touchWrite && !palm) return;
 
   try { live.setPointerCapture(e.pointerId); } catch (_) { /* 캡처 실패는 무시 */ }
@@ -331,7 +373,7 @@ live.addEventListener('pointerdown', (e) => {
 
   if (kind === 'eraseStroke') {
     const removed = [];
-    active.set(e.pointerId, { kind, removed, stroke: null, t: Date.now(), drawn: 0 });
+    active.set(e.pointerId, { kind, removed, stroke: null, t: Date.now(), startedAt: Date.now(), drawn: 0 });
     eraseStrokeAt(pointOf(e), removed);
     notifyDrawing();
     return;
@@ -339,7 +381,7 @@ live.addEventListener('pointerdown', (e) => {
 
   const stroke = makeStroke(kind, e);
   stroke.pts.push(pointOf(e, stroke.auto));
-  const a = { kind, stroke, t: Date.now(), drawn: 0 };
+  const a = { kind, stroke, t: Date.now(), startedAt: Date.now(), drawn: 0 };
   active.set(e.pointerId, a);
   if (stroke.comp === 'destination-out') { drawSegments(bctx, stroke, 1); a.drawn = 1; }
   else requestPaint();

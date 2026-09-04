@@ -40,7 +40,6 @@ const S = {
   palmThreshold: 45,
   lastTouchSize: 0,
   touchSizeReported: false,
-  sawPen: false,
   fanOpen: true,
   pickerOpen: false,
   submenu: 'color'
@@ -124,7 +123,7 @@ function ring2() {
       item('touch', '<span class="lbl">터치<br>필기</span>', '손가락 필기 켜기/끄기',
         () => { S.touchWrite = !S.touchWrite; render(); pushState(); toast('터치 필기 ' + (S.touchWrite ? '켜짐' : '꺼짐')); },
         { toggle: () => S.touchWrite }),
-      item('palm', '<span class="lbl">팜<br>지우기</span>', '손바닥으로 지우기',
+      item('palm', '<span class="lbl">팜<br>지우기</span>', '손바닥 · 두 손가락으로 지우기',
         () => { S.palmErase = !S.palmErase; render(); pushState(); toast('팜 지우기 ' + (S.palmErase ? '켜짐' : '꺼짐')); },
         { toggle: () => S.palmErase }),
       item('clear', '<span class="lbl">전체<br>지우기</span>', '모두 지우기', () => sendCmd('clear')),
@@ -315,11 +314,10 @@ function updateSlider() {
 
   if (key === 'palmThreshold') {
     // 접촉 크기를 보고하지 않는 기기에서는 크기 기준이 성립하지 않는다.
-    // 그런 기기는 "펜은 쓰고 손은 지운다" 로 대신 동작하므로 그 사실을 알려준다.
+    // 그런 기기는 동시 접촉 개수로 대신 판단하므로 그 사실을 알려준다.
     sizeLabel.textContent = S.touchSizeReported
-      ? '팜 인식 크기 (측정: ' + (S.lastTouchSize || '-') + ')'
-      : (S.sawPen ? '이 화면은 접촉 크기를 못 읽습니다 — 펜은 필기, 손은 지우기'
-                  : '팜 인식 크기 (이 화면은 접촉 크기를 보고하지 않습니다)');
+      ? '팜 인식 크기 (측정: ' + (S.lastTouchSize || '-') + ') · 두 손가락도 지우개'
+      : '이 화면은 접촉 크기를 못 읽습니다 — 손바닥·두 손가락으로 문지르면 지워집니다';
     const d = Math.min(30, Math.max(4, S[key] / 6));
     sizeDot.style.cssText = 'width:' + d + 'px;height:' + d + 'px;background:#9aa1ad';
   } else {
@@ -541,7 +539,6 @@ window.pipen.onFromOverlay((m) => {
   if (m.touchSize !== undefined) {
     S.lastTouchSize = m.touchSize;
     if (m.sizeReported !== undefined) S.touchSizeReported = m.sizeReported;
-    if (m.sawPen !== undefined) S.sawPen = m.sawPen;
     if (S.submenu === 'settings') updateSlider();
   }
 });
